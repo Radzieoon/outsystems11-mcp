@@ -57,7 +57,7 @@ directs the **agent** to interact with, and the systems the MCP server engages d
 | External Service | Communication Type | Purpose |
 | --- | --- | --- |
 | Coding Agent (Claude Code, GitHub Copilot, Antigravity, Kiro, Codex CLI, Cursor) | Sync (context load) | Consumes SKILL.md + references, plus the harness adapter it recognizes (if any); emits Model API lambdas and MCP tool calls |
-| Service Studio in-process MCP Server (`127.0.0.1:41820/mcp`) | Sync (HTTP, MCP tool calls) | Exposes `applyModelApiCode`, the `get*` reads, `runQuery`, `listApps`, `getValidationMessages`, and host-only `omlReset` / `omlMerge` |
+| Service Studio in-process MCP Server (`127.0.0.1:41820/mcp`) | Sync (HTTP, MCP tool calls) | Exposes `applyModelApiCode`, the `get*` reads, `runQuery`, `listApps`, `getValidationMessages`, and host-only `startOmlEditSession` / `endOmlEditSession` / `omlMerge` / `omlReset` |
 | Bundled Model API sidecar | Sync (stdio JSON-RPC, out of scope) | Runs the C# `eSpace => {...}` lambda against a snapshot using the OutSystems Model API; implementation not in this repo |
 | Open `.oml` module + `%TEMP%\ServiceStudio.MCPServer\` snapshots | Sync (file I/O, host-managed) | Input snapshot (`<runId>-in.oml`) and mutated output (`<runId>-out.oml`); surfaced to the user via the Compare-and-Merge window |
 
@@ -106,29 +106,30 @@ that does not compile never runs at all and comes back as an MCP tool error, not
 
 **Evidence:**
 - `servicestudio-mcp-oml/SKILL.md` (§ 2 "Reading before writing" and the § 3 outcome table) — read-before-write reflex and the silent-no-op / saved-but-invalid rows.
-- `servicestudio-mcp-oml/reference/mcp-session-pointer.md` (Advance rules table) — the two deceptive outcomes where the pointer advances to an undesired save.
+- `servicestudio-mcp-oml/reference/mcp-session-pointer.md` (Advance rules table) - the two deceptive outcomes where the working copy moves to an undesired save.
 - `servicestudio-mcp-oml/effectiveness.yml` (`scenario_2`, `scenario_5`, `scenario_7`) — scores read-before-write, silent-no-op defence, and read-back confirmation.
 
 ### T4. OML mutation state is host-owned; the agent passes only `code` + `imports` and never threads file paths
 
-The host keeps a per-module **session pointer** at the last successful save and auto-chains
-successive edits through it — the agent never names input or output paths. The pointer advances only
-when the out file was written and `exceptionMessage` is empty; failed calls leave it untouched, so
-retries resume from the last good state (no `omlReset` needed for error recovery). The closing step
-of any mutating task is `omlMerge` with the returned `mutatedOmlPath`, which surfaces the diff into
-Service Studio's Compare-and-Merge window and clears that module's pointer, so the next call
-re-snapshots the live module. The pointer is cleared when the window opens, not when the user
-accepts, so a chain does not continue past a merge.
+The host keeps a per-module **edit session** (`startOmlEditSession` / `endOmlEditSession`) with a
+working copy that every successful save replaces - the agent never names input or output paths. The
+working copy moves only when the out file was written and `exceptionMessage` is empty; failed calls
+leave it untouched, so retries resume from the last good state (no `omlReset` needed for error
+recovery). `omlMerge` with the returned `mutatedOmlPath` surfaces the diff into Service Studio's
+Compare-and-Merge window and leaves the session open, so a task may merge checkpoints and keep
+editing; `endOmlEditSession` is the closing step that discards unmerged saves and deletes the working
+copy (verified 2026-10-30 on Service Studio 11.55.94).
 
 **Evidence:**
-- `servicestudio-mcp-oml/reference/mcp-session-pointer.md` — pointer advance rules, `omlReset`, `omlMerge`, and cross-module eviction.
-- `servicestudio-mcp-oml/SKILL.md` (§ 3 and § 3.1) — the agent-facing invocation shape (`code` + optional `imports`) and the auto-merge closing step.
+- `servicestudio-mcp-oml/reference/mcp-session-pointer.md` - session lifecycle, advance rules, `omlMerge`, `endOmlEditSession`, `omlReset`.
+- `servicestudio-mcp-oml/SKILL.md` (§ 3 and § 3.1) - the agent-facing invocation shape (`code` + optional `imports`), the session lifecycle and the merge-then-end closing step.
 - `servicestudio-mcp-oml/effectiveness.yml` (`scenario_4`) — asserts `omlReset` is *not* the recovery path for a failed apply.
+- `verification/skill-vs-server.md` - the live run that replaced the earlier "session pointer" description.
 
 ### T5. Reference content is layered by responsibility, with machine facts kept reproducible
 
 The corpus is organized so each layer has one job: `SKILL.md` is the single entry-point contract;
-`reference/` holds prose deep-dives (lambda mechanics, session pointer, per-element and Traditional
+`reference/` holds prose deep-dives (lambda mechanics, edit sessions, per-element and Traditional
 patterns, verb catalogue); `examples/` holds directly-liftable full lambdas; `integration-examples/`
 holds end-to-end transcripts; and `docs/` holds machine-derived Model API signatures. The `docs/`
 files are not hand-maintained — they are reflected from the live `OutSystems.Model.V1` assembly, and

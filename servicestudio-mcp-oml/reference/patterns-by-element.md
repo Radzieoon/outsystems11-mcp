@@ -503,8 +503,9 @@ Verified live 2026-09-30 on a Reactive module:
   setting it to `true` looks right in the saved copy (and silences a TrueChange warning), but
   **`omlMerge` drops it** — after the merge the live screen is still authenticated-only (verified
   live 2026-09-30: set, merged with `merged: true`, read back `AnonymousAccess = False`).
-- **Verify access on the live module after the merge**, not only on the `mutatedOmlPath` copy: after
-  `omlMerge` the pointer is cleared, so a read (or throw-probe) shows what Service Studio actually kept.
+- **Verify access on the live module after the merge**, not only on the `mutatedOmlPath` copy: reads
+  inside the edit session keep showing the working copy, so call `endOmlEditSession` first and then
+  read; that shows what Service Studio actually kept.
 - System roles: `eSpace.AnonymousRole`, `eSpace.RegisteredRole`, `eSpace.SystemRoles`. `eSpace.Roles` lists
   only the module's own roles.
 - The `AnonymousAccess_NoPermissionsNoRoles` warning ("only accessible by authenticated users, but there are

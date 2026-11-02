@@ -8,7 +8,9 @@ This transcript is a **real captured run** against a live module (`FloorPlan`,
 a Traditional Web app) on 2026-06-03. The request envelopes have since been
 updated to the current contract (a `sessionToken` from `createSessionToken`,
 arguments wrapped in `input`, capitalised validation `type` values); the model
-output and messages are as captured.
+output and messages are as captured. The run predates edit sessions: on the
+current server add `startOmlEditSession` before the first `applyModelApiCode`
+and `endOmlEditSession` after the merge (SKILL.md § 3.1).
 
 The recipe itself lives in
 [`../reference/patterns-by-element.md`](../reference/patterns-by-element.md) §
@@ -110,7 +112,7 @@ MCP host that throws, and it is unnecessary for an already-resident reference.
 ```
 
 Empty `exceptionMessage` + a non-empty `mutatedOmlPath` ⇒ the FK was saved and the
-session pointer advanced; that path is what you hand to `omlMerge`. The lone
+working copy moved to it; that path is what you hand to `omlMerge`. The lone
 `validationMessages` entry has `type: "Warning"` — **pre-existing** (the
 `SimpleColorPicker` HTML-injection note), not introduced by the FK — confirmed
 by Call 3b below. There is no `type: "Error"` entry, so this is not a
@@ -189,7 +191,7 @@ their setting.
 ## Pass predicate (this is what "verified" means here)
 
 1. `applyModelApiCode` → empty `exceptionMessage`, no `type: "Error"` entry in
-   `validationMessages`, and the out file was written (pointer advanced). ✅
+   `validationMessages`, and the out file was written (working copy moved). ✅
 2. Read-back via `getDataModel` shows the `CreatedBy` FK **and**
    `createdBy.DataType = user.IdentifierType` with `user` = `(System)/User`. ✅
 3. `getValidationMessages` shows no *new* errors (the one warning pre-dates the

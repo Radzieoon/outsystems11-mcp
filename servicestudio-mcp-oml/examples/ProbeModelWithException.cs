@@ -1,4 +1,4 @@
-// Read-only discovery probe: collect facts about the module into a string and return them through exceptionMessage (nothing is saved and the session pointer does not move)
+// Read-only discovery probe: collect facts about the module into a string and return them through exceptionMessage (nothing is saved and the working copy does not move; an open edit session is still required, see SKILL.md 3.1)
 // The MCP code sandbox rejects Console, System.*-qualified names and reflection, so throwing is the output channel. validationMessages still come back. Verified live 2026-09-30.
 
 using OutSystems.Model;

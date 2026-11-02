@@ -1,278 +1,195 @@
-# MCP session pointer, `omlReset`, and `omlMerge`
+# MCP edit sessions: `startOmlEditSession`, `applyModelApiCode`, `omlMerge`, `endOmlEditSession`, `omlReset`
 
-Service Studio's in-process MCP host keeps a **per-module session pointer** at
-the path of the last successful `applyModelApiCode` save. Successive tool calls
-observe that pointer and reuse it as their input — so a chain of edits flows
-through the host without the agent threading any intermediate paths. The first
-call after the host has no pointer (fresh boot, open module just changed, or
-right after `omlReset` or `omlMerge`) snapshots the live module from Service
-Studio onto disk and uses that snapshot as the starting input.
+> File name kept for link stability. Earlier builds of the server kept an implicit per-module
+> "session pointer" that this file used to describe. Since Service Studio 11.55.94 the state is an
+> explicit **edit session** per module, opened and closed by the agent. Everything below was
+> verified live on 2026-10-30 unless a line says otherwise
+> (see [`../../verification/skill-vs-server.md`](../../verification/skill-vs-server.md)).
 
-The pointer is host-only state, kept per open module. The agent neither reads nor sets it explicitly —
-but on a clean save `applyModelApiCode` returns the pointer's new path as
-`mutatedOmlPath`, which is what you hand to `omlMerge`.
+## The model in one paragraph
+
+A write starts with `startOmlEditSession`, which checks out a **working copy** of the live module
+under `%TEMP%\ServiceStudio.MCPServer\<runId>-in.oml`. Every clean `applyModelApiCode` saves a new
+`<runId>-out.oml`, deletes the previous working-copy file and makes the new file the working copy; the
+response hands you its path as `mutatedOmlPath`. While the session is open, every read tool shows the
+working copy, so your unmerged saves are visible to you and invisible to the user. `omlMerge` copies a
+saved file into the live module (through the Compare-and-Merge window or silently, per the user's
+setting) and changes nothing on the session side: you can keep editing and merge again.
+`endOmlEditSession` closes the session, deletes the working copy and discards whatever was saved but
+not merged. `omlReset` also closes the session, but leaves the last `-out.oml` on disk.
+
+The agent never names input or output paths. It passes `eSpaceName`, `code` and `imports`, and gets
+`mutatedOmlPath` back to hand to `omlMerge`.
+
+## Lifecycle at a glance
+
+| Call | Session | Files in `%TEMP%\ServiceStudio.MCPServer` | Response |
+|---|---|---|---|
+| `startOmlEditSession` | opens; fails if one is already open for the module | writes `<runId>-in.oml` (the live module, about 14 MB for a mid-size module); removes any read snapshot left by out-of-session reads | `{ "started": true }` |
+| `applyModelApiCode` (clean) | unchanged | writes `<runId>-out.oml`, deletes the previous working-copy file; one file per session at any time | `mutatedOmlPath` = the new file |
+| `applyModelApiCode` (exception, compile error, sandbox rejection, throw-probe) | unchanged | nothing written | `mutatedOmlPath: ""` or an MCP tool error |
+| read tool inside the session | unchanged | nothing written; reads the working copy | the working copy's state |
+| `omlMerge` | unchanged, whatever the user decides | the merged file stays | `{ "merged": bool, "message": string }` |
+| `endOmlEditSession` | closes | deletes the working copy | `{ "ended": true, "discardedChanges": bool }` |
+| `omlReset` | closes | **leaves** the last `-out.oml` (orphan until Service Studio restarts) | `{ "discardedChanges": bool, "eSpaceName": string }` |
+| read tool outside a session | none | the first sidecar read writes one `<runId>-in.oml` snapshot of the live module; later reads reuse it until the next `startOmlEditSession` deletes it | the live module's state |
+
+Service Studio wipes the folder when it starts (not while a second instance is running), and the
+folder does not exist until the first read or session of the day creates it.
 
 ## Advance rules
 
-The pointer only advances after `applyModelApiCode` runs successfully. "Success"
-means **the host-allocated out file exists AND `exceptionMessage` is empty.**
-Code that does not compile never runs, so it returns an MCP tool error instead
-of a result and cannot advance the pointer. Read tools never advance it.
+The working copy only moves after `applyModelApiCode` runs successfully. "Success" means **the
+host-allocated out file exists AND `exceptionMessage` is empty.** Code that does not compile never
+runs, so it returns an MCP tool error instead of a result and cannot move the working copy. Read
+tools never move it.
 
-| Outcome of `applyModelApiCode` | `exceptionMessage` | `mutatedOmlPath` | Pointer | Next call reads from |
+| Outcome of `applyModelApiCode` | `exceptionMessage` | `mutatedOmlPath` | Working copy | Next call reads from |
 |---|---|---|---|---|
-| Clean run | empty | path | **advances** | the new out file (auto-chain) |
-| Runtime exception failure | populated (or surfaced as an MCP tool error) | `""` | unchanged | last successful out file, or the live module if no prior success |
-| Compile error failure | *no result — an MCP tool error* | — | unchanged | last successful out file, or the live module if no prior success |
-| Silent no-op (lambda never references `eSpace`) | empty | path | advances — to an **unmodified** OML | the silent-no-op path |
-| Saved-but-invalid (`validationMessages` has a `type: "Error"` entry) | empty | path | advances — to an **invalid** OML | the invalid OML |
+| Clean run | empty | path | **moves** to the new out file | the new out file |
+| Runtime exception failure | populated (or surfaced as an MCP tool error) | `""` | unchanged | the last successful out file, or the `-in.oml` checkout if none |
+| Compile error failure | *no result, an MCP tool error* | - | unchanged | same as above |
+| Silent no-op (lambda never references `eSpace`) | empty | path | moves, to an **unmodified** OML | the silent-no-op file |
+| Saved-but-invalid (`validationMessages` has a `type: "Error"` entry) | empty | path | moves, to an **invalid** OML | the invalid OML |
 
-A failed call never corrupts the chain — the next attempt picks up from the
-last-good state. Read tools (`getDataModel`, `getScreen`, …) follow the same
-pointer so they see exactly what the last successful mutation produced. The
-silent no-op and saved-but-invalid cases are where the pointer advances to a
-save that doesn't reflect a valid intended change — defend by always mutating
-`eSpace` and by scanning `validationMessages` for a `type: "Error"` entry (see
-[`lambda-contract.md`](lambda-contract.md)).
+A failed call never corrupts the session: the next attempt picks up from the last good state. The
+silent no-op and saved-but-invalid cases are where the working copy moves to a save that does not
+reflect a valid intended change. Defend by always mutating `eSpace` and by scanning
+`validationMessages` for a `type: "Error"` entry (see [`lambda-contract.md`](lambda-contract.md)).
 
-> **`applyModelApiCode` returns `mutatedOmlPath`** — the saved path on a clean
-> run, `""` otherwise. (The old `omlSaved` boolean is gone.) It mirrors the
-> pointer's new position and is what you pass to `omlMerge`. Still verify a
-> mutation actually landed by reading the model back (silent-no-op trap).
+## `startOmlEditSession`
 
-When the pointer references a file that no longer exists on disk, the host drops
-the stale entry and re-snapshots the live module on the next call. Stale out files from superseded chain steps are
-best-effort deleted as the pointer advances.
-
-## `omlReset`
-
-Host-only MCP tool that drops the pointer for the module named in `eSpaceName`.
-Calling it forces the next tool invocation to re-snapshot that live module from
-Service Studio.
-
-**Discarding a chain is recoverable within the session.** The discarded working
-copy is *not* deleted — it stays on disk at the path `applyModelApiCode` already
-returned as `mutatedOmlPath`. Pass that path to `omlMerge` to bring the changes
-back. That is how to undo an accidental `omlReset`, so **keep the last
-`mutatedOmlPath` you were given.**
-
-### Request
+Required before the first `applyModelApiCode` on a module, throw-probes included.
 
 ```jsonc
-// agent → MCP server (call tool omlReset)
-{ "eSpaceName": "MyModule" }
+// agent -> MCP server (call tool startOmlEditSession)
+{ "input": { "eSpaceName": "MyModule" }, "sessionToken": "<token>" }
+// -> { "started": true }
 ```
 
-`eSpaceName` is **required** — use one of the `name` values from `listApps`.
+Errors (text as returned):
 
-### Response
+- `An OML edit session is already started for this module. Call endOmlEditSession before starting a new one.`
+- `applyModelApiCode` without a session: `No OML edit session is started. Call startOmlEditSession before making edits.`
 
-```jsonc
-{
-  "discardedChanges": true,
-  "eSpaceName":       "MyModule"
-}
-```
+Sessions are per module (`eSpaceName`): every error message says "for this module", and nothing
+observed suggests one module's session affects another's. Cross-module behaviour was not exercised
+on 2026-10-30.
 
-- `discardedChanges` — **`true` means an unmerged chain was thrown away.** `false`
-  means there was nothing to throw away: the module has no chain in flight, so the
-  call did nothing at all. `false` is **not** a failure — a failure comes back as
-  an error (see below). Safe to report to the user either way.
-- `eSpaceName` — echoed back, so a call targeting one of several open modules can
-  be matched to its response.
+## Reads inside and outside a session
 
-Errors:
-
-- `MODULE_NOT_LOADED` — `eSpaceName` is not open in Service Studio. (Earlier
-  versions of this server reported that case in the response body; it is now an
-  error, consistent with every other tool.)
-
-Resetting a module that only holds a plain snapshot of the live model is a no-op
-returning `false`. There is nothing there the live module doesn't already have,
-and the snapshot is reused only while the module's change-counter still matches —
-so any edit you make in the IDE meanwhile still causes a re-snapshot on the next
-call, reset or no reset.
-
-### How long the discarded copy lasts
-
-Until the next Service Studio startup, which wipes the MCP temp folder
-(`%TEMP%\ServiceStudio.MCPServer`). So recovery is a same-session affair: if a
-reset was a mistake, merge the copy back before restarting Studio. Nothing is
-archived beyond that.
-
-### When to call it
-
-Call `omlReset` to deliberately drop an in-flight mutation chain. Typical
-situations:
-
-- The user changes direction mid-task and wants the agent to start from the
-  live module rather than from a partially-built chain.
-- An `applyModelApiCode` call saved, but the result is unwanted and there is no
-  clean "undo this" snippet to layer on top.
-- Debugging the chain — verifying the agent works correctly against a fresh
-  snapshot.
-
-Do **not** call `omlReset` to recover from a failed `applyModelApiCode` —
-failed calls already leave the pointer untouched (see the Advance rules table),
-so the next attempt resumes from the last-good state automatically.
-
-When a reset discards changes the user might want back, tell them the copy is
-still on disk and that `omlMerge` with the last `mutatedOmlPath` brings it back.
-That is the difference between "your work is gone" and "your work is one call
-away" — but it only holds until Studio restarts, so say so.
+- **Inside** a session, every read (`getDataModel`, `getStructures`, `getScreen`, `runQuery`,
+  `getValidationMessages`, the name lists) answers from the working copy. `getStructures` listed a
+  structure created one call earlier and not yet merged. This is what makes the verify-by-read-back
+  step work, and it is also why a read cannot tell you what the live module holds.
+- **Outside** a session, reads answer from the live module. The first sidecar read writes one
+  `-in.oml` snapshot and later reads reuse it (four reads shared one file); the snapshot is dropped
+  by the next `startOmlEditSession`. If the user edits in Service Studio meanwhile, a read may
+  answer from that snapshot; open a session (which re-reads the live module) when it matters.
+- To confirm what Service Studio actually kept after a merge, read **after** `endOmlEditSession`.
 
 ## `omlMerge`
 
-Host-only MCP tool that merges the module named in `eSpaceName` with a mutated
-OML on disk. Whether that opens Service Studio's Compare-and-Merge window for
-the user to review, or is accepted with no dialog, is the user's own setting —
-there is no argument for it and the agent has no say.
-
-### Request
+Host-only tool that merges a saved OML into the module named in `eSpaceName`. Whether that opens
+the Compare-and-Merge window or is accepted with no dialog is the user's own setting; there is no
+argument for it.
 
 ```jsonc
-// agent → MCP server (call tool omlMerge)
-{
-  "eSpaceName":     "MyModule",
-  "mutatedOmlPath":     "C:\\…\\<runId>-out.oml"
-}
+// agent -> MCP server (call tool omlMerge)
+{ "input": { "eSpaceName": "MyModule", "mutatedOmlPath": "C:\\...\\<runId>-out.oml" }, "sessionToken": "<token>" }
+// -> { "merged": true, "message": "..." }
+// cancelled in the window -> { "merged": false, "message": "The merge was cancelled in the Compare and Merge window." }
 ```
 
-`eSpaceName` is **required**, same as `omlReset` — it decides which module the
-mutated OML is compared against, rather than whichever module happens to be
-active. Use one of the `name` values from `listApps`. `mutatedOmlPath` is
-**required** too: pass the value the last successful `applyModelApiCode`
-returned.
+- Pass the `mutatedOmlPath` from the **latest** successful `applyModelApiCode`. Earlier files no
+  longer exist (each save deletes the previous one).
+- `omlMerge` **does not end the session and does not touch the working copy.** After `merged: true`
+  the next `applyModelApiCode` continues on the same working copy; merge again whenever you want a
+  checkpoint in the module. The merged file stays on disk, and the same path can be passed again
+  (a cancelled merge was retried with the same path and accepted on 2026-10-30).
+- `merged: false` with the cancel message leaves everything in place: fix, save, merge again. For
+  `merged: false` with "The merge failed. See the log for details." see [`../SKILL.md`](../SKILL.md) § 3.1.
+- Under manual review the call blocks until the user decides, which may take minutes. Claude Code
+  aborts a call silent for 300 s; the window stays open, the user's accept still lands, and only the
+  response is lost. Announce the window to the user before calling, raise the per-server `"timeout"`
+  in `.mcp.json` (this repo sets 1800000 ms), and after an aborted call ask the user what they chose
+  instead of re-merging.
+- The window lists one line you did not ask for: a `(System)` entity reference flagged "Reference
+  has changed" (`Espace` or `Role` under `Dependencies > (System) > Entities > Database`). It is a
+  side effect of the sidecar's save; tell the user to accept it with the rest. The window labels the
+  live module "Your changes" and your OML "The other version".
 
-### Response
+Errors documented for the earlier server and not re-verified on 11.55.94: `MODULE_NOT_LOADED`
+(`eSpaceName` not open), `INVALID_ARGUMENT` (`mutatedOmlPath` empty, not a file this server produced,
+no longer on disk, or superseded by a later save).
+
+## `endOmlEditSession`
+
+The closing step of every mutating task, after the last `omlMerge`.
 
 ```jsonc
-{ "merged": true, "message": "..." }
+// agent -> MCP server (call tool endOmlEditSession)
+{ "input": { "eSpaceName": "MyModule" }, "sessionToken": "<token>" }
+// -> { "ended": true, "discardedChanges": false }   // session had no saves
+// -> { "ended": true, "discardedChanges": true }    // session had saves, merged or not
 ```
 
-Always check the value of the response's `merged` field to verify whether the
-merge completed successfully. Don't re-call `omlMerge` with the same
-`mutatedOmlPath` afterward: a successful merge deletes that file, so a repeat
-call fails with a file-not-found error that says nothing about whether the
-first call worked.
+- Deletes the working copy and discards anything saved but not merged. Merged changes are already
+  in the module and stay there.
+- **`discardedChanges: true` means "the working copy had saves"**, including saves you merged. It
+  came back `true` after a merge with nothing pending (2026-10-20) and after one unmerged save
+  (2026-10-30); `false` after a session with no saves. Do not report it to the user as lost work
+  unless you know a save was not merged.
+- Without a session: `No OML edit session is started. Call startOmlEditSession first.`
 
-Errors:
+## `omlReset`
 
-- `MODULE_NOT_LOADED` — `eSpaceName` is not open in Service Studio.
-- `INVALID_ARGUMENT` — `mutatedOmlPath` is empty, is not a file the MCP server
-  itself produced, or no longer exists on disk.
-- `INVALID_ARGUMENT` — `mutatedOmlPath` is not the working copy currently
-  tracked for that module, or its contents no longer match what was recorded
-  when the file was produced. You passed a path from an older chain, or edited
-  the file yourself; re-read the `mutatedOmlPath` from the last successful
-  `applyModelApiCode` response.
-- `INVALID_ARGUMENT` — `mutatedOmlPath` "was removed by" or "was superseded by"
-  a concurrent change to that module. Something else advanced the chain while
-  you were merging. The message says what to do and it is the only recovery:
-  call `applyModelApiCode` again, then merge the path *that* returns.
+Kept from the earlier server. Today it does two things: it **ends the edit session** (the next
+`applyModelApiCode` fails with "No OML edit session is started") and it **leaves the last `-out.oml`
+on disk**, where `endOmlEditSession` would delete it. Without a session it returns
+`{ "discardedChanges": false, "eSpaceName": "MyModule" }` and does nothing.
 
-### Merging is the closing step
+```jsonc
+// agent -> MCP server (call tool omlReset)
+{ "input": { "eSpaceName": "MyModule" }, "sessionToken": "<token>" }
+// -> { "discardedChanges": true, "eSpaceName": "MyModule" }
+```
 
-`omlMerge` requires a real, on-disk `mutatedOmlPath`, and `applyModelApiCode`
-returns exactly that on every clean save. So the closing step of any mutating
-task is: take the `mutatedOmlPath` from the **last** successful apply and call
-`omlMerge` with it — do it without being asked (see [`../SKILL.md`](../SKILL.md)
-§ 3.1). Skip it only when nothing was saved (`mutatedOmlPath: ""` on every
-call), the task was read-only, or the user asked you to discard the chain
-(`omlReset`).
+Use `endOmlEditSession` to discard work. Reach for `omlReset` only when the user wants the discarded
+file kept around: the tool description says the file can be passed to `omlMerge` to bring the work
+back, which was not exercised on 2026-10-30. The file survives until Service Studio restarts.
 
-### `omlMerge` clears that module's pointer
+Neither tool is error recovery. A failed `applyModelApiCode` leaves the working copy where it was,
+so the next attempt resumes from the last good state.
 
-Once the merge resolves, `omlMerge` drops the pointer for the module you named,
-so the next tool call re-snapshots the live module — which by then holds
-whatever the merge accepted. That is what keeps the agent in sync with the
-module after a merge; you do **not** need a follow-up `omlReset`.
+## Concurrency
 
-Two consequences worth planning around:
+Call host tools **one at a time** against a server. With seven calls in flight (reads, `omlReset`
+and an apply) one sidecar read failed with `[-32000] OML not found: ...\<runId>-in.oml`: a tool that
+re-snapshots had removed the file the read was about to open. The same read alone, and two reads in
+parallel, succeeded. Never run `omlReset`, `startOmlEditSession` or `endOmlEditSession` while another
+call to the same server is pending.
 
-- **The chain does not continue past a merge.** If the task has more legs, the
-  next `applyModelApiCode` starts a *new* chain off the live module. Merge once
-  at the end rather than merging intermediate states, unless you actually want
-  the user's accepted state as your new baseline.
-- **`omlMerge` blocks until the merge resolves, then drops the pointer.**
-  When the user reviews it, the call does not return until they accept, reject,
-  or close the Compare-and-Merge window — which may take minutes. When their
-  setting allows it to be accepted with no dialog, it returns right away. Either
-  way, by the time `omlMerge` returns, the pointer for that module is already
-  cleared and the agent is back on the live module — regardless of whether
-  `merged` came back `true` or `false`.
-  Nothing is lost on disk when the merge doesn't succeed — the mutated OML stays
-  at the `mutatedOmlPath` you passed, and passing it to `omlMerge` again puts the
-  same changes back in front of the user. But note that only re-*surfaces* the
-  work: there is no way to point the agent back at that file, so anything further
-  you build starts a new chain off the live module. **Keep the last
-  `mutatedOmlPath` even after merging** — it is the only handle on work the
-  user has not accepted yet.
-
-## `omlReset` vs `omlMerge` — when to choose which
-
-Both tools end the chain for the module they name; they differ in whether the
-work is surfaced to the user on the way out.
+## Choosing the closing call
 
 | User intent | Call |
 |---|---|
-| "Discard this chain; start fresh from the live module" | `omlReset eSpaceName=<module>` |
-| "Surface this chain back into the IDE so I can accept it" | `omlMerge eSpaceName=<module> mutatedOmlPath=<path from the last apply>` |
-| "That reset was a mistake — put it back" | `omlMerge eSpaceName=<module> mutatedOmlPath=<path from the last apply before the reset>` |
-| "I've merged, now keep going on the same module" | nothing — the next call already re-snapshots the live module |
-| Failed `applyModelApiCode` you want to retry | neither — the pointer is already unchanged |
-
-## What happens on the first call after reset or merge
-
-After `omlReset` or `omlMerge`, the next tool call observes an empty pointer for
-that module and triggers the host's snapshot path: the module is serialised under
-`%TEMP%\ServiceStudio.MCPServer\<runId>-in.oml`, that path is fed to the sidecar
-as the input, and (for `applyModelApiCode`) a fresh `<runId>-out.oml` is
-allocated. From that point the chain auto-advances again on every successful save.
-
-## Cross-module behaviour
-
-**Every open module keeps its own pointer.** Chains on different modules are
-independent: reading or mutating module B leaves module A's in-flight chain
-untouched, and `omlReset eSpaceName=A` drops only A's chain. So a task can hold
-an open chain on several modules at once, and each one needs its own closing
-`omlMerge`.
-
-Because pointers are per module, a reset targets exactly the module you name —
-which is why `eSpaceName` is required. Resetting one module never disturbs
-another.
-
-> Earlier versions of this server kept state for only **one** module at a time and
-> evicted (and deleted) other modules' working copies on the next access, which
-> silently destroyed an unmerged chain the moment the agent touched a second
-> module. That no longer happens — but it means switching modules no longer
-> implicitly drops the previous module's chain either. If you want a chain gone,
-> reset it explicitly.
+| "Put my changes into the module" | `omlMerge` with the latest `mutatedOmlPath`, then `endOmlEditSession` |
+| "Checkpoint now, keep going" | `omlMerge`; the session stays open |
+| "Discard everything not merged" | `endOmlEditSession` |
+| "Discard, but keep the file in case" | `omlReset` (file stays until Service Studio restarts) |
+| "That merge window, I cancelled it by mistake" | `omlMerge` again with the same path |
+| Failed `applyModelApiCode` you want to retry | nothing; the working copy is unchanged |
 
 ## Summary
 
-- The pointer is invisible to the agent — pass `code` (+ optional `imports`) to
-  `applyModelApiCode`, nothing more. Read tools take only their documented args
-  (`objectName` for the by-name `get<Element>` family, `includeJson` for
-  code-returning reads — always `"Never"`).
-- Pointer advances when the out file was written and `exceptionMessage` is
-  empty; otherwise it stays put. On a clean save the
-  apply response returns that path as `mutatedOmlPath` (the old `omlSaved`
-  boolean is gone).
-- `omlReset eSpaceName=<module>` deliberately drops that module's chain
-  (host-only) and returns `{ discardedChanges, eSpaceName }`. The discarded copy is
-  left on disk, so the drop stays reversible via `omlMerge` until Studio restarts —
-  which is why you should hold on to the last `mutatedOmlPath`.
-- `omlMerge eSpaceName=<module> mutatedOmlPath=<path>` surfaces a chain into the
-  IDE's merge UI (host-only) — pass it the `mutatedOmlPath` from the last
-  successful apply; it's the default closing step, and re-passing it after a
-  reset is how an accidental reset is undone.
-- **`omlMerge` blocks until the merge resolves, then clears that module's
-  pointer** — so the next call re-snapshots the live module (no follow-up
-  `omlReset` needed), the chain does not continue past a merge, and a rejected
-  merge leaves the agent on the live module too. Keep the last `mutatedOmlPath`
-  regardless.
-- Pointers are per module, so chains on different modules never interfere and
-  each needs its own closing `omlMerge`.
-- The silent-no-op and saved-but-invalid traps are the paths where the pointer
-  advances to an undesired save — see [`lambda-contract.md`](lambda-contract.md).
+- `startOmlEditSession` before the first write; `endOmlEditSession` when the task is done. Both take
+  `input: { eSpaceName }` plus the token.
+- The working copy moves only on a clean save; `mutatedOmlPath` is its path and the argument for
+  `omlMerge`. Each save deletes the previous file, so only the latest path is valid.
+- Reads inside a session show the working copy; outside, the live module.
+- `omlMerge` syncs into the module and leaves the session alone; merge as often as needed; the
+  file stays on disk; a cancelled merge can be retried with the same path.
+- `endOmlEditSession` deletes the working copy; `discardedChanges: true` only means it had saves.
+- `omlReset` ends the session too, but keeps the file; it is not error recovery.
+- One host call at a time; raise the client timeout before a manual-review merge.

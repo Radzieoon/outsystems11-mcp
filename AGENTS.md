@@ -32,15 +32,17 @@ disagree.
 - **Call `createSessionToken` exactly once, first** (`{ "clientName": "…" }`).
   The user approves a dialog in Service Studio; the result text is the token.
   The call waits for that approval with no signal to you, so tell the user to
-  approve the request in Service Studio before you call it.
+  approve the request in Service Studio before you call it. Claude Code aborts a
+  call silent for 300 s and a token approved later is lost: call again, and raise
+  the per-server `"timeout"` in `.mcp.json` first (this repo sets 1800000 ms).
   Pass it as a top-level `sessionToken` on every later call and reuse it across
   reconnects — never request a second one.
 - **Every tool except `listApps` wraps its arguments in `input`:**
   `{ "input": { … }, "sessionToken": "<token>" }`. `listApps` is just
   `{ "sessionToken": "<token>" }`. There is no flat shape. Examples:
   `applyModelApiCode` → `input: { eSpaceName, code, imports }` (all three
-  required); `omlMerge` → `input: { eSpaceName, mutatedOmlPath }`; `omlReset` →
-  `input: { eSpaceName }`. (`omlRefreshReferences`, `omlPublish` and `getRoleExceptions` take
+  required); `omlMerge` → `input: { eSpaceName, mutatedOmlPath }`; `startOmlEditSession`,
+  `endOmlEditSession` and `omlReset` → `input: { eSpaceName }`. (`omlRefreshReferences`, `omlPublish` and `getRoleExceptions` take
   `input: { eSpaceName }`; send the token to them too, even though their schemas
   don't declare it.)
 - **Summarise a module with one probe**, not one getter per element:
@@ -69,8 +71,9 @@ disagree.
   (`Exception`, `List<T>`, LINQ, `string.Join`, `GetType().Name`) are fine.
 - **Probe by throwing, not printing:** build a string and end the lambda with
   `throw new Exception("PROBE:" + s);`. The text comes back in
-  `exceptionMessage`; nothing is saved, the pointer does not move, and
-  `validationMessages` for the in-memory model are still returned.
+  `exceptionMessage`; nothing is saved, the working copy does not move (an open
+  edit session is still required), and `validationMessages` for the in-memory
+  model are still returned (the whole module's list, large on big modules).
 - **Read before you write:** call `getDataModel` (or the matching `get*`) first
   and pattern-match its output. Code-returning reads require `includeJson`
   (always pass `"Never"`).
@@ -97,13 +100,21 @@ disagree.
   `eSpace => { throw new Exception("PROBE:ok"); }` (`PROBE:ok` coming back proves
   the session is healthy), then re-issue with one risky member per call. Known
   crash members: `servicestudio-mcp-oml/reference/reactive-widget-api.md`.
-- **Finalise with `omlMerge`:** after the final successful mutation, call
-  `omlMerge` with `input: { eSpaceName, mutatedOmlPath }` to open Service
-  Studio's Compare-and-Merge window. Skip only for read-only tasks or when
-  nothing saved.
-- **`merged: false` ("The merge failed. See the log for details.")**: the reason is only in a Service Studio dialog. Ask the user what it says, `omlReset`, re-apply without the cause, and merge the new path. Never set `Theme.IconLibrary`: older Service Studio builds reject the whole merge. Editing the theme stylesheet is fine, and the sidecar's `InvalidIconLibrary` error it causes is expected; merge anyway (SKILL.md § 3.1).
-- **`omlRefreshReferences` drops the session pointer** — an unmerged chain
-  vanishes from reads. Refresh before starting a chain, or merge first.
+- **Open an edit session before the first write:** `startOmlEditSession` with
+  `input: { eSpaceName }`; `applyModelApiCode` without one fails with
+  `No OML edit session is started`. Reads inside the session show the working
+  copy, not the live module. Call host tools one at a time.
+- **Finalise with `omlMerge`, then `endOmlEditSession`:** after the final successful
+  mutation, call `omlMerge` with `input: { eSpaceName, mutatedOmlPath }` to open
+  Service Studio's Compare-and-Merge window (the session stays open, so you can keep
+  editing and merge again), then end the session. Skip the merge only for read-only
+  tasks or when nothing saved; end the session either way. Under manual review the
+  merge waits for the user and Claude Code aborts after 300 s of silence, so announce
+  the window and raise the client timeout (SKILL.md § 3.1).
+- **`merged: false` ("The merge failed. See the log for details.")**: the reason is only in a Service Studio dialog. Ask the user what it says, `endOmlEditSession` then `startOmlEditSession`, re-apply without the cause, and merge the new path. Never set `Theme.IconLibrary`: older Service Studio builds reject the whole merge. Editing the theme stylesheet is fine, and the sidecar's `InvalidIconLibrary` error it causes is expected; merge anyway (SKILL.md § 3.1).
+- **`omlRefreshReferences` acts on the live module**; its effect on an open edit
+  session is not verified. Refresh before `startOmlEditSession`, or merge and end
+  the session first.
 - **Call `omlPublish` only when the user explicitly asks to publish.** It needs a
   write permission granted in the MCP Server dialog and returns status
   `blocked` while that is withheld.

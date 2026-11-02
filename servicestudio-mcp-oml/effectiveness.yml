@@ -65,7 +65,7 @@ scenario_1:
     Using Service Studio's in-process MCP Server, write the
     `applyModelApiCode` call that adds a `Customer` server entity with a
     `Name` text attribute (length 200) to the open module `MyModule`. You
-    already hold a session token. Show the JSON payload you would send to
+    already hold a session token and an open edit session on `MyModule`. Show the JSON payload you would send to
     the tool, and describe the very next tool call you would make after
     this one succeeds.
 
@@ -90,8 +90,8 @@ scenario_1:
       - point: "Uses literal identifier `eSpace`"
         description: "The lambda parameter and all method calls use the identifier `eSpace` (not `m`, `app`, `model`, or any rename). The host's injected save is hardcoded to `eSpace`; any other identifier fails to compile with CS0103."
 
-      - point: "Next call is a verify read with `getDataModel`, then `omlMerge`"
-        description: "The response says the next step after a successful mutation is to re-read with `getDataModel` (or the matching `get*`) to confirm the change landed (a clean response is not proof of mutation — silent-no-op trap), then to finalise by calling `omlMerge` with the `mutatedOmlPath` returned by the apply call. It should NOT claim the path is unavailable or that merging can only happen through the Service Studio UI."
+      - point: "Next call is a verify read with `getDataModel`, then `omlMerge`, then `endOmlEditSession`"
+        description: "The response says the next step after a successful mutation is to re-read with `getDataModel` (or the matching `get*`) to confirm the change landed (a clean response is not proof of mutation - silent-no-op trap), then to finalise by calling `omlMerge` with the `mutatedOmlPath` returned by the apply call, and to close the edit session with `endOmlEditSession`. It should NOT claim the path is unavailable or that merging can only happen through the Service Studio UI."
 
       - point: "Payload uses the `input` envelope plus `sessionToken`"
         description: "The JSON payload is shaped `{ \"input\": { \"eSpaceName\": \"MyModule\", \"code\": \"…\", \"imports\": [...] }, \"sessionToken\": \"<token>\" }` — `code`, `imports` and `eSpaceName` nested inside `input` (all three present; `imports` may be `[]`) and the token as a top-level sibling. A flat `{ \"code\": …, \"imports\": … }` payload, or one with no `sessionToken`, is the WRONG answer under the current contract."
@@ -152,7 +152,7 @@ scenario_3:
   validation:
     prerequisites:
       - point: "Names the MCP tools"
-        description: "The sequence uses `listApps`, `getDataModel`, `applyModelApiCode` and `omlMerge` (in some sensible order), not UI clicks or REST endpoints."
+        description: "The sequence uses `listApps`, `getDataModel`, `startOmlEditSession`, `applyModelApiCode`, `omlMerge` and `endOmlEditSession` (in some sensible order), not UI clicks or REST endpoints."
 
       - point: "Shows JSON arguments per call"
         description: "Each call is shown with a concrete JSON arguments object."
@@ -172,6 +172,9 @@ scenario_3:
 
       - point: "`omlMerge` puts both `eSpaceName` and `mutatedOmlPath` inside `input`"
         description: "The merge call is `{ \"input\": { \"eSpaceName\": \"MyModule\", \"mutatedOmlPath\": \"<path from the apply response>\" }, \"sessionToken\": … }`. Sending `mutatedOmlPath` flat, or omitting `eSpaceName`, is the WRONG answer."
+
+      - point: "Opens and closes the edit session"
+        description: "`startOmlEditSession` (`{ \"input\": { \"eSpaceName\": \"MyModule\" }, \"sessionToken\": … }`) comes before the first `applyModelApiCode`, and `endOmlEditSession` (same shape) comes after `omlMerge`. Calling `applyModelApiCode` with no session open is the WRONG answer: the server rejects it with `No OML edit session is started`. Ending the session before the merge is also WRONG, because that discards the unmerged save."
 
       - point: "Does not call `omlPublish`"
         description: "The sequence ends at `omlMerge`; it does NOT call `omlPublish`, because the user did not ask to publish."
@@ -200,7 +203,7 @@ scenario_4:
   validation:
     prerequisites:
       - point: "Identifies a compile error"
-        description: "The response says the code failed to compile — NOT a runtime error, NOT a validation error. (Compile failures surface as an MCP tool error carrying `Script compilation failed` and `compilationErrors:` lines — there is no result object, so no `exceptionMessage` or `mutatedOmlPath` — and the out file was not written, so the pointer did not advance.)"
+        description: "The response says the code failed to compile - NOT a runtime error, NOT a validation error. (Compile failures surface as an MCP tool error carrying `Script compilation failed` and `compilationErrors:` lines - there is no result object, so no `exceptionMessage` or `mutatedOmlPath` - and the out file was not written, so the working copy did not move.)"
 
       - point: "Proposes a retry"
         description: "The response says the agent should fix the `code` and submit a new `applyModelApiCode` call."
@@ -213,7 +216,7 @@ scenario_4:
         description: "The fix proposed is to wrap the statements in a complete `eSpace => { ... }` lambda ending in `}` (and still no `eSpace.Save`). NOT 'add semicolons', NOT 'rename the parameter'."
 
       - point: "Does NOT call `omlReset` to recover"
-        description: "The response correctly says `omlReset` is NOT needed: failed calls leave the session pointer untouched, so the next attempt resumes from the last good state. `omlReset` is for deliberately dropping an in-flight chain, not for error recovery."
+        description: "The response correctly says `omlReset` is NOT needed: failed calls leave the edit session's working copy untouched, so the next attempt resumes from the last good state. `omlReset` ends the edit session (and leaves its file on disk); it is for deliberately dropping unmerged work, not for error recovery."
 
 scenario_5:
   name: "silent_noop_trap"
@@ -242,7 +245,7 @@ scenario_5:
         description: "The trigger is a lambda that compiles cleanly and runs but NEVER mutates `eSpace` (e.g. an empty body, or statements that only read or build locals, such as `eSpace => { var n = eSpace.Name; }`). The response identifies this specific cause — NOT 'compilation succeeded but logic was wrong', NOT 'wrong parameters'. Offering `Console.WriteLine(...)` as the example trigger is inaccurate under the current contract: the code sandbox rejects `Console` before compile, so that lambda is a tool error, not a silent no-op."
 
       - point: "Response shape is successful-looking"
-        description: "The response correctly states that the result has an empty `exceptionMessage`, no `validationMessages` entry of type `Error` (typically `[]`), AND a populated `mutatedOmlPath` — the out file is written and the session pointer advances, so it is indistinguishable from a clean run by field inspection alone. A populated `mutatedOmlPath` must NOT be described as proof the model changed; and the answer must NOT claim `mutatedOmlPath` is absent from the response (it is present — it is the path handed to `omlMerge`). It must NOT describe `compilationErrors` / `validationOutput` result fields — they do not exist."
+        description: "The response correctly states that the result has an empty `exceptionMessage`, no `validationMessages` entry of type `Error` (typically `[]`), AND a populated `mutatedOmlPath` - the out file is written and becomes the working copy, so it is indistinguishable from a clean run by field inspection alone. A populated `mutatedOmlPath` must NOT be described as proof the model changed; and the answer must NOT claim `mutatedOmlPath` is absent from the response (it is present - it is the path handed to `omlMerge`). It must NOT describe `compilationErrors` / `validationOutput` result fields - they do not exist."
 
       - point: "Defence is read-back via `get*`"
         description: "The defensive step prescribed is: after mutating, call `getDataModel` (or the matching `get*`) and confirm the intended change is actually present. NOT 'check `exceptionMessage`' alone."
@@ -251,7 +254,7 @@ scenario_5:
         description: "The response explicitly says that an empty `exceptionMessage` only means the injected Save ran — it does NOT prove the lambda actually changed anything semantically."
 
       - point: "Distinguishes the silent no-op from a runner process-crash"
-        description: "If the answer contrasts the no-op with the crash outcome, it gets the discriminator right: a silent no-op WRITES the out file (populated `mutatedOmlPath`, pointer advances), whereas a process-crash returns `mutatedOmlPath: \"\"` with the pointer unchanged. It must NOT conflate the two — 'empty everything' is the crash, not the no-op."
+        description: "If the answer contrasts the no-op with the crash outcome, it gets the discriminator right: a silent no-op WRITES the out file (populated `mutatedOmlPath`, working copy moves), whereas a process-crash returns `mutatedOmlPath: \"\"` with the working copy unchanged. It must NOT conflate the two - 'empty everything' is the crash, not the no-op."
 
 scenario_6:
   name: "traditional_web_ui_creation"
@@ -396,7 +399,7 @@ scenario_8:
         description: "The prescribed recovery is: first run a trivial health probe — e.g. the throw-probe `eSpace => { throw new Exception(\"PROBE:ok\"); }`, where `PROBE:ok` coming back in `exceptionMessage` proves the session is healthy (a trivial non-crashing lambda that returns a path is equally acceptable) — then re-issue the lambda with ONE risky/unproven member per call until it dies. A probe using `System.Console.WriteLine` is WRONG (sandbox-rejected). It must NOT be 'reread your code carefully', 'retry the same call', or 'restart Service Studio' as the first move."
 
       - point: "Does NOT call `omlReset`"
-        description: "The response says `omlReset` is not needed: a crash leaves the session pointer unchanged, so the last good state (including earlier successful mutations in the chain) is intact. Calling `omlReset` would discard that chain and is the WRONG answer."
+        description: "The response says `omlReset` is not needed: a crash leaves the working copy unchanged, so the last good state (including earlier saves in the edit session) is intact. Calling `omlReset` would end the session and discard those saves and is the WRONG answer."
 
 scenario_9:
   name: "chart_binding_and_reference_probe"
@@ -525,7 +528,7 @@ scenario_11:
         description: "The response avoids the traps that bite on a migrated module: no `dataAction.CreateInputParameter(...)`, no `screen.ScreenDataSets` enumeration (prefer `screen.DataActions.Named(...)`), no `screen.ClientActions` (use `ScreenActions`), and no recursive `.Widgets` walking — descend one known-container level at a time. It must NOT propose locating a crash with `Console.WriteLine` breadcrumbs (the sandbox rejects `Console`, and a crash returns nothing anyway); bisect by removing statements instead. It must NOT propose reflection (`GetType().GetProperty(...)`, `GetMethod`, `Invoke`) to reach node members — the sandbox rejects it (only `GetType().Name` and `GetType().GetInterfaces()` pass, for diagnosis); use the typed interface members (e.g. `Target`, `CycleTarget`)."
 
       - point: "One atomic mutation per step, validate after each, fix forward"
-        description: "The workflow applies one mutation per call with `getValidationMessages` after each (to catch saved-but-invalid immediately), fixes forward rather than calling `omlReset` (which would nuke the whole unmerged chain including earlier good fixes), and calls `omlMerge` once at the end with the final `mutatedOmlPath`."
+        description: "The workflow applies one mutation per call with `getValidationMessages` after each (to catch saved-but-invalid immediately), fixes forward rather than calling `omlReset` or `endOmlEditSession` (either would discard every unmerged save including earlier good fixes), and calls `omlMerge` at the end with the final `mutatedOmlPath`, then `endOmlEditSession`."
 
       - point: "Hands layout/CSS work back to the user, or verifies it visually"
         description: "The response defers visual layout / CSS tweaks to the user in Service Studio, because they are unreliable blind through the Model API (no rendered preview, no visual iteration). If it does make CSS changes, it puts them in the theme stylesheet (not block/screen stylesheets, whose edits often do not publish) and confirms the deployed CSS and a rendered screenshot. It also scopes 'the screens' to the content screens and flags the shared `Common` layout blocks as an optional follow-up rather than converting them unprompted."
@@ -650,7 +653,7 @@ scenario_14:
         description: "The code builds a string (e.g. with `string.Join` over `w.GetType().Name`) and ends with `throw new Exception(\"PROBE:\" + s);`, and the response says the text comes back in `exceptionMessage`. Returning it through `stdoutOutput`, or through a local variable, is the WRONG answer."
 
       - point: "Knows the probe commits nothing"
-        description: "The response says a throw-probe saves nothing and leaves the session pointer where it was (`mutatedOmlPath` is empty), so no `omlReset` is needed — and ideally that `validationMessages` for the in-memory model are still returned, which lets a probe preview TrueChange for an edit placed before the throw."
+        description: "The response says a throw-probe saves nothing and leaves the working copy where it was (`mutatedOmlPath` is empty), so no `omlReset` or `endOmlEditSession` is needed - and ideally that `validationMessages` for the in-memory model are still returned, which lets a probe preview TrueChange for an edit placed before the throw."
 
       - point: "`imports` only `OutSystems.Model.*`; NRWidgets types fully qualified"
         description: "The `imports` array contains only `OutSystems.Model` or its sub-namespaces (or is empty). `ServiceStudio.Plugin.NRWidgets` is NOT in `imports` — the host rejects it with `Import '…' is not allowed` — and NRWidgets types are written fully qualified in the code (e.g. `ServiceStudio.Plugin.NRWidgets.IInput`)."
@@ -731,7 +734,7 @@ scenario_16:
         description: "The code REMOVES `eSpace.RegisteredRole` — and the `Clerk` role — from `approvals.Roles`, leaving `Manager`, because screens carry `Registered` plus every application role by default. Merely adding `Manager` (or checking it is present) leaves every logged-in user with access and is the WRONG answer."
 
       - point: "Verifies on the live module after merging"
-        description: "The confirmation step re-reads the screens' roles AFTER omlMerge (the pointer is cleared, so the read shows what Service Studio kept) — not only the pre-merge copy or a clean response. A public screen should read Anonymous (usually with Registered); Approvals should read Manager only."
+        description: "The confirmation step re-reads the screens' roles AFTER omlMerge and AFTER endOmlEditSession (reads inside the edit session show the working copy, so only a read after the session ended shows what Service Studio kept) - not only the pre-merge copy or a clean response. A public screen should read Anonymous (usually with Registered); Approvals should read Manager only."
 
       - point: "Full lambda — `eSpace => { ... }`, no `eSpace.Save(...)`"
         description: "The `code` is a complete `eSpace => { ... }` lambda (begins with `eSpace =>`, ends in `}`) and does NOT call `eSpace.Save(...)`."

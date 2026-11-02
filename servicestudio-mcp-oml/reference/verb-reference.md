@@ -10,19 +10,22 @@ started it fails with `ConnectionRefused`. **Tool names are camelCase, with no
 Tools fall into three buckets:
 
 - **Native host tools** that act on the live Service Studio session directly:
-  `createSessionToken`, `listApps`, and the host-only `omlReset` / `omlMerge` /
-  `omlRefreshReferences` / `omlPublish`.
+  `createSessionToken`, `listApps`, and the host-only `startOmlEditSession` /
+  `endOmlEditSession` / `omlMerge` / `omlReset` / `omlRefreshReferences` / `omlPublish`.
 - **Sidecar-backed read tools** — `getDataModel`, `getScreen`, `runQuery`,
-  `getValidationMessages`, … Each one snapshots the open module to
-  `%TEMP%\ServiceStudio.MCPServer\<runId>-in.oml`, runs the bundled sidecar, and returns
-  the result. One child process per call.
-- **The write tool** `applyModelApiCode`, which works the same way but also
-  injects the save and advances the session pointer on success.
+  `getValidationMessages`, … Outside an edit session the first one snapshots the open
+  module to `%TEMP%\ServiceStudio.MCPServer\<runId>-in.oml` and later reads reuse that
+  file; inside an edit session they read the session's working copy. Each call runs the
+  bundled sidecar and returns the result. One child process per call.
+- **The write tool** `applyModelApiCode`, which works the same way but requires an
+  open edit session, injects the save and makes the saved file the new working copy.
 
 The sidecar verb name equals the MCP tool name (each tool class sets
 `VerbName = McpToolNames.<X>`). The host injects `omlPath` (the snapshot, or the
-session-pointer path) into every sidecar call, so the agent never threads OML
+working copy) into every sidecar call, so the agent never threads OML
 paths between calls (see [`mcp-session-pointer.md`](mcp-session-pointer.md)).
+Call host tools **one at a time**: a read racing `omlReset` failed with
+`OML not found: <runId>-in.oml` (observed 2026-10-30).
 
 > **Source of truth:** `Host/McpToolNames.cs` for the names, and each
 > `Tools/*.cs` class for its input record + description. Keep this reference in
@@ -41,7 +44,11 @@ Verified live against Service Studio 11 on 2026-09-30.
 2. **Every other tool takes `sessionToken` as a top-level argument** (the schema also
    tags it `x-mcp-header: SessionToken`). A call with no token, or a token this
    server didn't issue, is rejected. **Send it on every call**, including
-   `omlPublish`, `omlRefreshReferences` and `getRoleExceptions` — their schemas don't declare it, but send it anyway: `getRoleExceptions` rejects a call without it ("This tool requires a valid session token", verified 2026-10-01).
+   `omlPublish`, `omlRefreshReferences` and `getRoleExceptions` - their schemas don't declare it, but send it anyway: `getRoleExceptions` rejects a call without it (`-32002 This tool requires a valid session token. Call createSessionToken first and pass the returned value as the sessionToken argument.`, verified 2026-10-01 and 2026-10-30).
+4. **`createSessionToken` blocks until the user answers the dialog.** Claude Code aborts a
+   call silent for 300 s and the token approved afterwards is lost; call again (a second
+   dialog appears). Raise the per-server `"timeout"` in `.mcp.json` first when the user may
+   be slow (this repo sets 1800000 ms; verified 2026-10-30).
 3. **Every tool except `listApps` wraps its own arguments in `input`:**
 
 ```jsonc
@@ -97,8 +104,9 @@ calling the sidecar**, so the value you send is effectively ignored — yet the
 field must be present or the MCP call fails to deserialize. **Always pass
 `"Never"`.**
 
-The name-list tools (`get…Names`), `listApps`, `runQuery`,
-`getValidationMessages`, `omlReset`, and `omlMerge` take **no** `includeJson`.
+The name-list tools (`get…Names`), `listApps`, `runQuery`, `getValidationMessages`,
+`getDataExposure`, `startOmlEditSession`, `endOmlEditSession`, `omlReset`, and `omlMerge`
+take **no** `includeJson`.
 
 ## Write tool — `applyModelApiCode`
 
@@ -148,7 +156,7 @@ surface through `exceptionMessage` (or as an MCP tool error such as
 `OML_TOOL_VERB_FAILURE` if the sidecar returned a JSON-RPC error envelope).
 **There is no `compilationErrors` field** — code that doesn't compile never
 runs, so it returns an MCP tool error (`OML_TOOL_CODE_REJECTED`) carrying the
-diagnostics instead of a result. The session pointer advances only when the out
+diagnostics instead of a result. The working copy moves only when the out
 file was written and `exceptionMessage` is empty.
 
 ## Read tools
@@ -251,10 +259,11 @@ namespaces define an `IExternalSite`).
 
 | Tool | Args | Returns |
 |---|---|---|
-| `runQuery` | `query:string` (ModelQL; starts with `Root { … }`, selection sets mandatory; e.g. `Root { ServerActions { Name } }`. `Screens` is **not** a field on `Root`, despite the example in the tool description — query screens as `MobileFlows { Name Nodes { Name } }` or `WebFlows { Name Nodes { Name } }` (verified 2026-10-17). Large selections return big JSON: prefer `examples/ProbeModuleInventory.cs` for a whole-module inventory), optional `executionOptions.includeTypeName:bool` | `QueryESpaceOutput` — matching model elements as JSON |
-| `getValidationMessages` | optional `filter:string[]` (subset of `["info","warning","error"]`; empty/null = all; returned `type`s are capitalised) | `{ validationMessages: ValidationMessage[] }` — TrueChange validation against the current pointer |
+| `runQuery` | `query:string` (ModelQL; starts with `Root { … }`, selection sets mandatory; e.g. `Root { ServerActions { Name } }`. `Screens`, `Blocks` and `UIFlows` are **not** fields on `Root`, despite the example in the tool description (`Schema is not configured correctly to fetch field 'Screens' from type 'ESpace'`) - query screens as `MobileFlows { Name Nodes { Name } }` or `WebFlows { Name Nodes { Name } }`; `Root { Name Key }` works (verified 2026-10-17, 2026-10-30). Large selections return big JSON: prefer `examples/ProbeModuleInventory.cs` for a whole-module inventory), optional `executionOptions.includeTypeName:bool` | `QueryESpaceOutput` - matching model elements as JSON |
+| `getValidationMessages` | optional `filter:string[]` (subset of `["info","warning","error"]`; empty/null = all; returned `type`s are capitalised) | `{ validationMessages: ValidationMessage[] }` - TrueChange validation against the working copy inside an edit session, otherwise against the live module |
+| `getDataExposure` | optional `includeServerSide:bool` (default false), `includeSources:bool` (default true; false returns only `distinctAttributes`, `count`, `unresolvedCount`) | Data sources that reach the browser (aggregates, SQL queries, data actions, variables) with the entities and attributes they expose, grouped by entity. In the catalogue on 11.55.94; not yet exercised by this skill |
 | `getSerializedObject` | — | Raw JSON serialization of an object |
-| `getSerializedObjectByKey` | `objectKey:string` | Object fetched by key, serialized as JSON |
+| `getSerializedObjectByKey` | `objectKey:string` (a model element key; the `key` that `listApps` returns is not one and fails with `[-32602] Object with key '…' not found`, verified 2026-10-30) | Object fetched by key, serialized as JSON |
 | `getSerializedObjectByNameAndType` | `objectName:string`, `objectType:string` (fully-qualified model interface, e.g. `OutSystems.Model.Data.IServerEntity`) | Object fetched by name+type, serialized as JSON |
 
 > `getValidationMessages` replaces the old
@@ -265,7 +274,7 @@ namespaces define an `IExternalSite`).
 | Tool | Args | Returns |
 |---|---|---|
 | `createSessionToken` | `clientName?` (top level, no `input`) | the token string — call once per agent session (see "Session token" above) |
-| `listApps` | only `sessionToken` | `{ apps: [{ key, name, kind:"eSpace", version, isOpen, isReference, moduleType }] }` — open module + loaded references. `moduleType` (formerly `style`) ∈ `Reactive`, `Mobile`, `Traditional`, `ReactiveLibrary`, `MobileLibrary`, `TraditionalLibrary`, `Service`, `Unknown` (see [`../SKILL.md`](../SKILL.md) § 4.1) |
+| `listApps` | only `sessionToken` | `{ apps: [{ key, name, kind:"eSpace", version, description, isOpen, isReference, moduleType }] }` - the open module(s) only; despite the tool description no reference rows come back (verified 2026-09-30, 2026-10-30), and `version` was `"0"`. `moduleType` (formerly `style`) ∈ `Reactive`, `Mobile`, `Traditional`, `ReactiveLibrary`, `MobileLibrary`, `TraditionalLibrary`, `Service`, `Unknown` (see [`../SKILL.md`](../SKILL.md) § 4.1) |
 
 > **`searchModel` was removed** from the MCP host (no cross-element substring
 > search tool exists anymore). Find elements by name via the matching
@@ -276,10 +285,12 @@ namespaces define an `IExternalSite`).
 
 | Tool | Args | Returns |
 |---|---|---|
-| `omlReset` | `eSpaceName:string` | `{ discardedChanges:bool, eSpaceName:string }` — throws away that module's unmerged chain; `discardedChanges:false` means there was none and nothing was done (not a failure). The discarded OML is **not deleted**, so an accidental reset is undone by passing the last apply's `mutatedOmlPath` to `omlMerge` (until the next Studio startup clears the temp folder). `MODULE_NOT_LOADED` if the module isn't open (see [`mcp-session-pointer.md`](mcp-session-pointer.md)) |
-| `omlRefreshReferences` | `eSpaceName:string` (send `sessionToken` too, although the schema omits it) | `{ message, hasErrors:bool, hasWarnings:bool }` — refreshes every reference of the **live** module to its latest version (Manage Dependencies → Refresh All); does not add new dependencies. **Drops the session pointer** — an unmerged chain vanishes from reads (its `-out.oml` stays on disk). Verified 2026-09-30 |
+| `startOmlEditSession` | `eSpaceName:string` | `{ started:true }` - checks out a working copy (`<runId>-in.oml`) of the live module; required before any `applyModelApiCode` on that module, throw-probes included. Fails with `An OML edit session is already started for this module. Call endOmlEditSession before starting a new one.` when one is open (verified 2026-10-30; see [`mcp-session-pointer.md`](mcp-session-pointer.md)) |
+| `endOmlEditSession` | `eSpaceName:string` | `{ ended:true, discardedChanges:bool }` - the closing call of a mutating task, after the last `omlMerge`: deletes the working copy and discards saves not merged. `discardedChanges:true` means the working copy had saves (merged ones included), not that work was lost. Fails with `No OML edit session is started. Call startOmlEditSession first.` when there is none (verified 2026-10-30) |
+| `omlReset` | `eSpaceName:string` | `{ discardedChanges:bool, eSpaceName:string }` - **ends the edit session** like `endOmlEditSession`, but leaves the last `-out.oml` on disk until the next Studio startup clears the temp folder; `discardedChanges:false` with no session means nothing was done (not a failure). Prefer `endOmlEditSession`. `MODULE_NOT_LOADED` if the module isn't open (verified 2026-10-30; see [`mcp-session-pointer.md`](mcp-session-pointer.md)) |
+| `omlRefreshReferences` | `eSpaceName:string` (send `sessionToken` too, although the schema omits it) | `{ message, hasErrors:bool, hasWarnings:bool }` - refreshes every reference of the **live** module to its latest version (Manage Dependencies → Refresh All); does not add new dependencies. Under the pointer model it dropped the in-flight chain (verified 2026-09-30); its effect on an open edit session is not re-verified, so refresh before `startOmlEditSession` or after `endOmlEditSession` |
 | `omlPublish` | `eSpaceName:string` (send `sessionToken` too, although the schema omits it) | 1-Click Publish of the live module, waits for the result → `{ published:bool, status:"success"|…, reason:string, messages:["Uploading","Compiling","Deploying","Done"] }` (verified 2026-10-03, 16 s for a small module). The module must be open in Service Studio, otherwise it fails with "Module 'X' is not open in Service Studio". Needs the user's "allow automatic merge and publish" permission in the MCP Server dialog; while it is withheld it returns at once with `{ published:false, status:"blocked", reason:"Publishing requires a write permission the user has not granted. …", messages:[] }` and publishes nothing (verified 2026-10-03). **Only on explicit user request.** |
-| `omlMerge` | `eSpaceName:string`, `mutatedOmlPath:string` | `{ merged:bool, message:string }` — merges the supplied OML into the named module and blocks until that resolves, then **clears that module's session pointer** so the next call re-snapshots the live module. Always check `merged` to verify the merge completed; on `true` the change is already in the module, so don't re-call with the same path (a successful merge deletes it, so a repeat fails with file-not-found regardless of whether the first call worked). Pass the `mutatedOmlPath` returned by the last successful `applyModelApiCode`; it's the default closing step (see [`mcp-session-pointer.md`](mcp-session-pointer.md)) |
+| `omlMerge` | `eSpaceName:string`, `mutatedOmlPath:string` | `{ merged:bool, message:string }` - merges the supplied OML into the named module and blocks until that resolves. **Does not end the edit session and does not touch the working copy**: keep editing and merge again when you want another checkpoint. Always check `merged`; on `true` the change is already in the module, so don't re-call with the same path (the file stays on disk and a repeat opens the window again). A cancelled review returns `{ merged:false, message:"The merge was cancelled in the Compare and Merge window." }` with everything left in place. Under manual review the call waits for the user; Claude Code aborts after 300 s of silence while the merge still completes, so raise the client timeout and announce the window (verified 2026-10-30). Pass the `mutatedOmlPath` returned by the latest successful `applyModelApiCode`, then `endOmlEditSession` (see [`mcp-session-pointer.md`](mcp-session-pointer.md)) |
 
 > **The merge mode is the user's, not yours.** Whether `omlMerge` opens the
 > Compare-and-Merge window for the user to review or accepts the changes with no
@@ -302,28 +313,28 @@ When responding to a "modify the OML to do X" request:
    [`../examples/`](../examples/) files are already in exactly this shape —
    full `eSpace => { … }` lambdas with no `eSpace.Save` — so you can use one
    verbatim as `code` and lift its `using` directives into `imports`.
-4. **Call `applyModelApiCode`** with `code` (+ any non-default `imports`). Don't
+4. **Open the edit session** with `startOmlEditSession` (`input: { eSpaceName }`), then
+   **call `applyModelApiCode`** with `code` (+ any non-default `imports`). Don't
    pass `omlPath` — the host injects it.
 5. **Inspect the response:**
    - `exceptionMessage` populated (or an MCP tool error) → runtime issue; fix
-     and retry; the pointer didn't advance.
+     and retry; the working copy didn't move.
    - An MCP tool error carrying `compilationErrors:` lines (no result at all) →
-     syntax / wrong API name; fix and retry; the pointer didn't advance.
+     syntax / wrong API name; fix and retry; the working copy didn't move.
    - Empty `exceptionMessage` and no `type: "Error"` in `validationMessages`
-     → the pointer advanced; the next read reflects your change.
+     → the saved file is the new working copy; the next read reflects your change.
    - `validationMessages` has a `type: "Error"` entry → saved-but-invalid;
      fix it.
    - Clean response **but a follow-up read doesn't show your change** → the
      silent-no-op trap (lambda never referenced `eSpace`). See
      [`lambda-contract.md`](lambda-contract.md).
-6. **Re-read** the modified state to confirm the mutation landed (the pointer
-   makes this transparent — same tool, same args).
-7. **Finalise with `omlMerge`:** after the last successful `applyModelApiCode`,
-   call `omlMerge` with its `mutatedOmlPath` to bring the change into the module
-   — the default closing step of any mutating task. Check `merged` in the
-   response. Skip only when nothing was saved
-   (`mutatedOmlPath: ""`), the task was read-only, or the user asked you to
-   discard the chain (`omlReset`). See
+6. **Re-read** the modified state to confirm the mutation landed (inside the
+   session every read answers from the working copy - same tool, same args).
+7. **Finalise with `omlMerge`, then `endOmlEditSession`:** after the last successful
+   `applyModelApiCode`, call `omlMerge` with its `mutatedOmlPath` to bring the change
+   into the module and check `merged` in the response; then end the session. Skip the
+   merge only when nothing was saved (`mutatedOmlPath: ""`), the task was read-only, or
+   the user asked you to discard the work (then `endOmlEditSession` alone). See
    [`mcp-session-pointer.md`](mcp-session-pointer.md).
 
 The recovery loop in step 5 is the dominant teaching signal — see

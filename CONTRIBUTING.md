@@ -80,8 +80,8 @@ in SKILL.md or the reference docs, update the matching scenario points.
   file's body into SKILL.md.
 - Maintain the `## Contents` table of contents when you add or rename a section.
 
-**`reference/`** — one Markdown file per deep-dive topic (lambda contract, session
-pointer, per-element patterns, Traditional Web, verb reference, tips). When you add
+**`reference/`** - one Markdown file per deep-dive topic (lambda contract, edit
+sessions, per-element patterns, Traditional Web, verb reference, tips). When you add
 one, link it from the SKILL.md § 6 table. Cross-reference sibling files with
 relative links rather than restating them.
 

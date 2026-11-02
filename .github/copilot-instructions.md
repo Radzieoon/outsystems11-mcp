@@ -23,7 +23,11 @@ condensed restatement; `SKILL.md` wins if they ever disagree.
   `{ "input": { … }, "sessionToken": "<token>" }`; `listApps` is just
   `{ "sessionToken": "<token>" }`. `applyModelApiCode` →
   `input: { eSpaceName, code, imports }` (all required); `omlMerge` →
-  `input: { eSpaceName, mutatedOmlPath }`; `omlReset` → `input: { eSpaceName }`.
+  `input: { eSpaceName, mutatedOmlPath }`; `startOmlEditSession`, `endOmlEditSession`
+  and `omlReset` → `input: { eSpaceName }`.
+- **Open an edit session before the first write** (`startOmlEditSession`); without one
+  `applyModelApiCode` fails with `No OML edit session is started`. Reads inside the
+  session show the working copy, not the live module. Call host tools one at a time.
 - **Summarise a module with one probe**
   (`servicestudio-mcp-oml/examples/ProbeModuleInventory.cs`), not one getter per element.
   The probe throws before saving, so it's a read: use it even when asked not to change anything.
@@ -67,13 +71,17 @@ condensed restatement; `SKILL.md` wins if they ever disagree.
   `eSpace => { throw new Exception("PROBE:ok"); }` (`PROBE:ok` back proves the
   session is healthy), then re-issue with one risky member per call. Known crash
   members: `servicestudio-mcp-oml/reference/reactive-widget-api.md`.
-- **Finalise with `omlMerge`:** after the final successful mutation, call
-  `omlMerge` with `input: { eSpaceName, mutatedOmlPath }` to open Service
-  Studio's Compare-and-Merge window. Skip only for read-only tasks or when
-  nothing saved.
-- **`merged: false` ("The merge failed. See the log for details.")**: the reason is only in a Service Studio dialog. Ask the user what it says, `omlReset`, re-apply without the cause, and merge the new path. Never set `Theme.IconLibrary`: older Service Studio builds reject the whole merge. Editing the theme stylesheet is fine, and the sidecar's `InvalidIconLibrary` error it causes is expected; merge anyway (SKILL.md § 3.1).
-- **`omlRefreshReferences` drops the session pointer** (unmerged chain vanishes
-  from reads) — refresh before a chain or merge first. **`omlPublish` only when
+- **Finalise with `omlMerge`, then `endOmlEditSession`:** after the final successful
+  mutation, call `omlMerge` with `input: { eSpaceName, mutatedOmlPath }` to open
+  Service Studio's Compare-and-Merge window (the session stays open; merge again
+  whenever you want a checkpoint), then end the session. Skip the merge only for
+  read-only tasks or when nothing saved; end the session either way. Under manual
+  review the merge waits for the user; announce the window and make sure the client
+  timeout allows it.
+- **`merged: false` ("The merge failed. See the log for details.")**: the reason is only in a Service Studio dialog. Ask the user what it says, `endOmlEditSession` then `startOmlEditSession`, re-apply without the cause, and merge the new path. Never set `Theme.IconLibrary`: older Service Studio builds reject the whole merge. Editing the theme stylesheet is fine, and the sidecar's `InvalidIconLibrary` error it causes is expected; merge anyway (SKILL.md § 3.1).
+- **`omlRefreshReferences` acts on the live module** (its effect on an open edit
+  session is not verified) - refresh before `startOmlEditSession`, or merge and end
+  the session first. **`omlPublish` only when
   the user explicitly asks to publish** (returns `blocked` until the user grants
   the write permission).
 - **The *same* `An error occurred invoking '<toolName>'` on every tool means the

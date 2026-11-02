@@ -22,8 +22,9 @@ module.
 1. **Call `createSessionToken` exactly once, at session start**
    (`{ "clientName": "…" }`). The user approves a dialog in Service Studio; the
    result text is the token. Reuse it across reconnects — never request a second.
-2. **Pass `sessionToken: "<token>"` as a top-level argument on every other call**
-   (`omlPublish` and `omlRefreshReferences` take none).
+2. **Pass `sessionToken: "<token>"` as a top-level argument on every other call**,
+   `omlPublish`, `omlRefreshReferences` and `getRoleExceptions` included (their
+   schemas omit it, but the server rejects a call without it).
 3. **Every tool except `listApps` wraps its arguments in `input`:**
    `{ "input": { … }, "sessionToken": "<token>" }`. `listApps` is just
    `{ "sessionToken": "<token>" }`. There is no flat shape.
@@ -64,9 +65,9 @@ OutSystems Model API … (found 'X')`). Unqualified BCL basics (`Exception`,
 
 **Probe by throwing, not printing.** Build a string and end the lambda with
 `throw new Exception("PROBE:" + s);`. The text arrives in `exceptionMessage`;
-nothing is saved, the pointer does not move, and `validationMessages` for the
-in-memory model are still returned — so a probe also previews TrueChange for an
-edit without committing it.
+nothing is saved, the working copy does not move (an open edit session is still
+required), and `validationMessages` for the in-memory model are still returned - so
+a probe also previews TrueChange for an edit without committing it.
 
 ## 2. Read before you write
 
@@ -128,19 +129,26 @@ signed Service Studio) — surface it, don't rewrite the lambda.
 
 ## 4. Finalise — merge the mutated OML
 
+Every write runs inside an edit session: call `startOmlEditSession`
+(`{ "input": { "eSpaceName": "<module>" }, "sessionToken": "<token>" }`) before the
+first `applyModelApiCode`; without it the write fails with `No OML edit session is
+started`. Reads inside the session show the working copy, not the live module.
+
 As soon as the **final** `applyModelApiCode` that satisfies the request returns
 a non-empty `mutatedOmlPath`, call `omlMerge` with that path:
 `{ "input": { "eSpaceName": "<module>", "mutatedOmlPath": "<path>" }, "sessionToken": "<token>" }`.
 It opens Service Studio's interactive Compare-and-Merge window so the user
-reviews and accepts the diff. Skip only when the task was read-only, every call
-returned `mutatedOmlPath: ""`, or the user asked to discard the chain
-(`omlReset`, `input: { eSpaceName }`).
+reviews and accepts the diff; the session stays open, so you can keep editing and
+merge again. Then call `endOmlEditSession` (`input: { eSpaceName }`) to close the
+session. Skip the merge only when the task was read-only, every call returned
+`mutatedOmlPath: ""`, or the user asked to discard the work (then
+`endOmlEditSession` alone discards it).
 
-- **`merged: false` ("The merge failed. See the log for details.")**: the reason is only in a Service Studio dialog. Ask the user what it says, `omlReset`, re-apply without the cause, and merge the new path. Never set `Theme.IconLibrary`: older Service Studio builds reject the whole merge. Editing the theme stylesheet is fine, and the sidecar's `InvalidIconLibrary` error it causes is expected; merge anyway (SKILL.md § 3.1).
+- **`merged: false` ("The merge failed. See the log for details.")**: the reason is only in a Service Studio dialog. Ask the user what it says, `endOmlEditSession` then `startOmlEditSession`, re-apply without the cause, and merge the new path. Never set `Theme.IconLibrary`: older Service Studio builds reject the whole merge. Editing the theme stylesheet is fine, and the sidecar's `InvalidIconLibrary` error it causes is expected; merge anyway (SKILL.md § 3.1).
 - **`omlRefreshReferences`** (`input: { eSpaceName }`, plus the token) refreshes all
-  references like Manage Dependencies → Refresh All, but **drops the session
-  pointer** — an unmerged chain vanishes from reads. Refresh before starting a
-  chain, or merge first.
+  references like Manage Dependencies → Refresh All on the live module; its effect on
+  an open edit session is not verified. Refresh before `startOmlEditSession`, or
+  merge and end the session first.
 - **`omlPublish`** (`input: { eSpaceName }`, plus the token) does a 1-Click Publish.
   Call it **only when the user explicitly asks to publish**; it returns status
   `blocked` until the user grants the write permission in the MCP Server dialog.
@@ -184,7 +192,7 @@ recipes: `servicestudio-mcp-oml/reference/traditional-patterns.md` and
 | Naming gotchas (eSpace vs Module, IMobile* vs UI, Signature types) | `servicestudio-mcp-oml/reference/model-api-tips.md` |
 | Namespace catalogue | `servicestudio-mcp-oml/reference/model-api-summary.md` |
 | MCP tool surface | `servicestudio-mcp-oml/reference/verb-reference.md` |
-| Session pointer, omlReset, omlMerge, mutatedOmlPath | `servicestudio-mcp-oml/reference/mcp-session-pointer.md` |
+| Edit sessions (startOmlEditSession / endOmlEditSession), omlMerge, omlReset, mutatedOmlPath | `servicestudio-mcp-oml/reference/mcp-session-pointer.md` |
 | Lambda sketches per element type (incl. grouped-aggregate reference-by-alias trap) | `servicestudio-mcp-oml/reference/patterns-by-element.md` |
 | Module-style detection payload, full `*Traditional` verb table, Reactive-vs-Traditional interface mapping | `servicestudio-mcp-oml/reference/module-style-support.md` |
 | **Reactive Web** UI creation (screen scaffold, block/placeholder instancing, KPI tiles, data-bound styles, charts) | `servicestudio-mcp-oml/reference/reactive-ui-creation.md` |
@@ -217,12 +225,14 @@ recipes: `servicestudio-mcp-oml/reference/traditional-patterns.md` and
 - Replaying `get*` read-back to edit (it duplicates the element), or silently
   substituting a different widget when the requested one fails to create.
 - Firing several calls at once at the same module, or re-calling `omlMerge`
-  after it timed out on your side.
+  after it timed out on your side (the merge still completed in Service Studio;
+  ask the user what they chose).
 - Looking for a compile error in the result — it arrives as an MCP tool
   error carrying the diagnostics instead.
 - Reading an all-empty response as a compile error — it's a **runner crash**;
   bisect one risky member per call instead of rewriting the lambda.
-- Forgetting the closing `omlMerge` (or omitting `eSpaceName` from its `input`).
+- Forgetting `startOmlEditSession` before the first write, the closing `omlMerge`,
+  or `endOmlEditSession` at the end (or omitting `eSpaceName` from their `input`).
 - Calling `omlPublish` when the user didn't ask to publish.
 
 ## Security

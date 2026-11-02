@@ -8,18 +8,19 @@ via a `moduleType` field (called `style` in older builds).
 ## Detecting the style
 
 ```jsonc
-// listApps response
+// listApps response (shape verified 2026-10-30; only the open module is listed,
+// no reference rows come back despite the tool description)
 {
   "apps": [
     {
-      "key": "...",
+      "key": "...",                 // an app key, not a model key: getSerializedObjectByKey rejects it
       "name": "FloorPlan",
       "kind": "eSpace",
-      "version": "...",
+      "version": "0",               // "0" when unknown
       "description": "...",
       "isOpen": true,
       "isReference": false,
-      "style": "Traditional"   // ← see enum below
+      "moduleType": "Traditional"   // ← see enum below
     }
   ]
 }
@@ -54,7 +55,7 @@ underlying sidecar — they walk `eSpace.MobileFlows` only and return empty /
 | Get one external site | `getExternalSite` | `getExternalSiteTraditional` |
 
 Each `*Traditional` tool's description tells you to prefer it when
-`listApps.style` is `"Traditional"` or `"TraditionalLibrary"`. The Traditional
+`listApps.moduleType` is `"Traditional"` or `"TraditionalLibrary"`. The Traditional
 single-object verbs return **Model API C# code** (the same dialect as the
 Reactive/Mobile verbs and as `applyModelApiCode`'s `code` arg), so you can
 pattern-match the output directly. `IExternalSite` is style-specific — there

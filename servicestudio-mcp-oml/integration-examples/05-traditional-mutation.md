@@ -13,7 +13,7 @@ The Traditional read surface (5 single-object `*Traditional` + 5 `*NamesTraditio
 
 ## Turn
 
-Four MCP calls, plus IDE-side finalisation. (Every call carries the `sessionToken` obtained once from `createSessionToken` — see [`01-add-entity-via-mcp.md`](01-add-entity-via-mcp.md) Call 0.)
+Four MCP calls, plus IDE-side finalisation. The write (Call 4) needs an open edit session: call `startOmlEditSession` (`input: { eSpaceName }`) right before it, and `endOmlEditSession` after the merge in Call 5 - see [`01-add-entity-via-mcp.md`](01-add-entity-via-mcp.md) Calls 1b and 5. (Every call carries the `sessionToken` obtained once from `createSessionToken` - see Call 0 there.)
 
 ### Call 1 — `listApps` (style detection)
 
@@ -131,7 +131,7 @@ Note: `IWebScreen` is unqualified — the host-default imports include `OutSyste
 }
 ```
 
-Empty `exceptionMessage` + the out file was written → the session pointer advanced and the OML is saved on disk under `%TEMP%\ServiceStudio.MCPServer\`. The lone `validationMessages` entry has `type: "Warning"` (not `"Error"`; values are capitalised, so compare case-insensitively), and it's the pre-existing SimpleColorPicker HTML-injection note, unrelated to our changes — note it but don't act on it unless the user asked. (A `type: "Error"` entry would be the saved-but-invalid case and would warrant a fix.)
+Empty `exceptionMessage` + the out file was written → the working copy moved to the saved OML under `%TEMP%\ServiceStudio.MCPServer\`. The lone `validationMessages` entry has `type: "Warning"` (not `"Error"`; values are capitalised, so compare case-insensitively), and it's the pre-existing SimpleColorPicker HTML-injection note, unrelated to our changes - note it but don't act on it unless the user asked. (A `type: "Error"` entry would be the saved-but-invalid case and would warrant a fix.)
 
 Before merging, confirm the rename actually took the name you asked for: the Model API silently suffixes a taken or reserved name (`Plans` → `Plans2`) instead of failing, so a quick `getScreenNamesTraditional` read-back of `.Name` is worth the call.
 
@@ -152,7 +152,7 @@ The mutations are merged into the live module — highlighted in Service Studio'
 
 - **Read-only browse** (no mutations): stop after Call 2 / Call 3. Nothing to surface.
 - **Rename only**, no session variable: drop the `CreateSessionVariable` line from Call 4's lambda. Same flow otherwise.
-- **Larger structural change** (e.g. add a screen action): peek with Call 3 first, then build the lambda referencing the existing widget tree. Stay in one `applyModelApiCode` lambda when possible — the session pointer chains successive calls but a single lambda is atomic in the merge UI.
+- **Larger structural change** (e.g. add a screen action): peek with Call 3 first, then build the lambda referencing the existing widget tree. Stay in one `applyModelApiCode` lambda when possible - the edit session chains successive calls but a single lambda is atomic in the merge UI.
 
 ## Pattern-matching cheatsheet for Traditional lambdas
 

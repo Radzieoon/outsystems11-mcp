@@ -103,7 +103,7 @@ eSpace => {
 ```
 
 After wrap, it compiles, runs, mutates, and the host's Save persists. The
-session pointer advances; `exceptionMessage` is empty.
+saved file becomes the session's working copy; `exceptionMessage` is empty.
 
 ### Full lambda that never references `eSpace` — compiles but no-ops
 
@@ -113,7 +113,7 @@ eSpace => { var n = eSpace.Name; }
 
 After wrap this is a valid `Action<IESpace>`. The body executes, the injected
 Save persists the **unmodified** eSpace. The
-response looks clean and the pointer advances — but the OML on disk is
+response looks clean and the working copy moves - but the OML on disk is
 byte-identical to the input. This is the **silent no-op**. Defend against it by
 always actually mutating `eSpace`.
 
@@ -157,17 +157,21 @@ The injected save still references `eSpace`, so:
 
 | `code` shape | Compiles? | Mutates OML? | Response |
 |---|---|---|---|
-| Full lambda that mutates `eSpace` | Yes | Yes | clean; pointer advances |
+| Full lambda that mutates `eSpace` | Yes | Yes | clean; working copy moves to the save |
 | Full lambda that never touches `eSpace` | Yes | No | clean-looking but OML unmodified — **silent no-op** |
-| Body-only statements (no wrapper) | No | No | MCP tool error carrying the diagnostics; pointer unchanged |
+| Body-only statements (no wrapper) | No | No | MCP tool error carrying the diagnostics; working copy unchanged |
 | `code` not ending in `}` | No | No | rejected by the host before the sidecar runs — `INVALID_ARGUMENT`, telling you the body must end in `}` |
 | Lambda parameter ≠ `eSpace` | No (`CS0103`) | No | MCP tool error carrying the diagnostics |
 | Mentions `Console`, a `System.…` name, reflection, or imports a non-`OutSystems.Model` namespace | No — rejected by the sandbox before compiling | No | MCP tool error naming the offending token (§ "Sandbox" below) |
-| Ends with `throw new Exception("PROBE:" + s)` | Yes | No (by design) | `exceptionMessage` = your text; `validationMessages` still returned; pointer unchanged |
+| Ends with `throw new Exception("PROBE:" + s)` | Yes | No (by design) | `exceptionMessage` = your text; `validationMessages` still returned; working copy unchanged |
+
+Every row needs an open edit session (`startOmlEditSession`); without one the host
+answers `No OML edit session is started. Call startOmlEditSession before making edits.`
+before any of this happens (verified 2026-10-30).
 
 ## Why the MCP host injects the Save
 
-The host owns the output path so it can advance the session pointer
+The host owns the output path so it can move the session's working copy
 deterministically (see [`mcp-session-pointer.md`](mcp-session-pointer.md)) —
 you never name the save destination. The standalone verb does
 NOT inject a save; used directly, you write the full lambda **with**
@@ -199,7 +203,7 @@ error envelope, as an MCP tool error (`OML_TOOL_VERB_FAILURE` /
 that doesn't compile never runs, so it returns an MCP tool error
 (`OML_TOOL_CODE_REJECTED`) whose message carries the diagnostics, one per line
 prefixed `compilationErrors:`. Don't look for them in the result.
-The session pointer only advances when the out file was written and
+The working copy only moves when the out file was written and
 `exceptionMessage` is empty — which is
 exactly when `mutatedOmlPath` is populated. **`mutatedOmlPath` alone doesn't
 prove the mutation was meaningful**: both a clean run and a silent no-op
@@ -227,7 +231,7 @@ Failed attempts keep reads pointed at the last good state.
 | `validationMessages` has a `type: "Error"` entry | Saved-but-invalid — the model compiled and saved but has a TrueChange error | Fix the offending element (often a hard-coded aggregate name that was auto-renamed); see [`patterns-by-element.md`](patterns-by-element.md) |
 
 The recovery is always the same shape: read the response, edit the lambda,
-retry. Failed calls don't advance the pointer, so successive attempts resume
+retry. Failed calls don't move the working copy, so successive attempts resume
 from the last-good state without corrupting the input.
 
 ## Default imports — what's already in scope
@@ -295,8 +299,9 @@ eSpace => {
 ```
 
 The response has `exceptionMessage: "PROBE:screens=…"` (verbatim), `mutatedOmlPath: ""`,
-the pointer does not move, and **`validationMessages` still lists TrueChange
-messages for the in-memory model** — so you can build an edit, throw at the
+the working copy does not move, and **`validationMessages` still lists TrueChange
+messages for the in-memory model** (the whole module's list, which on a large module can
+exceed your client's inline result limit) - so you can build an edit, throw at the
 end, and read what TrueChange *would* say before committing it. Full
 template: [`../examples/ProbeModelWithException.cs`](../examples/ProbeModelWithException.cs).
 

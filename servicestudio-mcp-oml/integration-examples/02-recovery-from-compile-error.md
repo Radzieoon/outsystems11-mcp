@@ -55,7 +55,7 @@ The lambda compiles and runs cleanly. Nothing mutates `eSpace`. The host's appen
 }
 ```
 
-`exceptionMessage` is empty and `validationMessages` is empty. The out file was written, so `mutatedOmlPath` is populated and the session pointer advanced. Pattern-matching on the response alone, the agent thinks the mutation landed — and the names it computed went nowhere.
+`exceptionMessage` is empty and `validationMessages` is empty. The out file was written, so `mutatedOmlPath` is populated and the working copy moved to it. Pattern-matching on the response alone, the agent thinks the mutation landed - and the names it computed went nowhere.
 
 ### Diagnosing — verify by reading back
 
@@ -84,7 +84,7 @@ The follow-up read is the only place the silent no-op surfaces. The clean respon
 
 ### Exploring correctly — the throw-probe
 
-To *see* something from inside a lambda, don't print (the sandbox forbids `Console`) and don't rely on a local: build a string and **throw it**. The text comes back in `exceptionMessage`, nothing is saved, and the session pointer does not move — so a probe can never masquerade as a mutation.
+To *see* something from inside a lambda, don't print (the sandbox forbids `Console`) and don't rely on a local: build a string and **throw it**. The text comes back in `exceptionMessage`, nothing is saved, and the working copy does not move - so a probe can never masquerade as a mutation. (A probe still needs the module's edit session open, like every `applyModelApiCode` call.)
 
 **Request**:
 
@@ -148,7 +148,7 @@ Verifying read against `getDataModel` now shows the `Customer` entity. Done.
 
 ## Other recoverable failure modes (the ones with explicit error signals)
 
-The silent no-op is the only failure mode that doesn't surface in the response. Everything else surfaces either as a populated `exceptionMessage` (a runtime throw) or as an MCP tool error with no result at all. Sandbox rejections and compile failures are the latter: code that doesn't compile never runs, so the diagnostics arrive in the tool error's message, one per line prefixed `compilationErrors:`. Missing-identifier and bad-statement errors are compile failures, so they take that path too. In each of these cases the out file is **not** written, so the session pointer stays at the previous good state.
+The silent no-op is the only failure mode that doesn't surface in the response. Everything else surfaces either as a populated `exceptionMessage` (a runtime throw) or as an MCP tool error with no result at all. Sandbox rejections and compile failures are the latter: code that doesn't compile never runs, so the diagnostics arrive in the tool error's message, one per line prefixed `compilationErrors:`. Missing-identifier and bad-statement errors are compile failures, so they take that path too. In each of these cases the out file is **not** written, so the working copy stays at the previous good state.
 
 ### Sandbox rejection — `Console`, `System.…`, reflection, or a disallowed import
 
@@ -232,7 +232,7 @@ Note this one is a genuine **runtime** throw (compiled cleanly, ran, then threw)
 
 The host folds the sidecar's JSON-RPC error envelope into `exceptionMessage`: it carries the top-level message (typically the .NET exception's `.Message`) and, where the sidecar emitted richer detail (`error.data.innerMessage`), that diagnostic too. Read it fully — sometimes the generic part ("Object reference not set...") sits next to the specific cause ("Unable to find object with Name equal to ...").
 
-When an exception is thrown, the host's appended `eSpace.Save(...)` never runs, so **no out file is written** and the session pointer stays at the previous good state.
+When an exception is thrown, the host's appended `eSpace.Save(...)` never runs, so **no out file is written** and the working copy stays at the previous good state.
 
 ### Saved-but-invalid (validation errors)
 
@@ -257,7 +257,7 @@ A distinct case: the lambda ran, mutated `eSpace`, and the out file **was** writ
 }
 ```
 
-A `validationMessages` entry whose `type` is `"Error"` is the saved-but-invalid case: the pointer **did** advance (out file written, empty `exceptionMessage`), but the model carries errors you should fix. A non-empty array alone doesn't mean the save failed, since `"Warning"` and `"Info"` entries are normal; branch on `type` (compare case-insensitively).
+A `validationMessages` entry whose `type` is `"Error"` is the saved-but-invalid case: the working copy **did** move (out file written, empty `exceptionMessage`), but the model carries errors you should fix. A non-empty array alone doesn't mean the save failed, since `"Warning"` and `"Info"` entries are normal; branch on `type` (compare case-insensitively).
 
 ---
 
@@ -268,15 +268,15 @@ A two-attempt recovery loop driven by reading the work back:
 1. Lambda that never mutates `eSpace` → response looks clean (empty `exceptionMessage`, empty `validationMessages`, out file written), but the verifying `getDataModel` doesn't show the change. Silent no-op caught by reading back, not by inspecting the response. Exploration belongs in a throw-probe, which returns its text in `exceptionMessage` and saves nothing.
 2. Retry with statements that actually mutate `eSpace` → real mutation, verifying read confirms.
 
-The MCP host **did** advance its session pointer on Attempt 1 (the out file was written with an empty `exceptionMessage`), so Attempt 2 reads from the silent-no-op OML — which happens to be byte-identical to the live module's initial state, so no harm. (If the silent no-op had layered atop earlier real changes, the pointer would still advance, and the silent-no-op OML would carry those earlier changes intact. The trap is "no new change", not "lost old changes".)
+The MCP host **did** move its working copy on Attempt 1 (the out file was written with an empty `exceptionMessage`), so Attempt 2 reads from the silent-no-op OML - which happens to be byte-identical to the session's initial checkout, so no harm. (If the silent no-op had layered atop earlier real changes, the working copy would still move, and the silent-no-op OML would carry those earlier changes intact. The trap is "no new change", not "lost old changes".)
 
 ## Things to remember
 
 - **The silent no-op is the only failure mode the response can't tell you about.** Always verify mutations by reading back via the matching `get*` tool. If the change isn't there, the lambda never touched `eSpace`.
-- **"Out file written + empty `exceptionMessage`" is necessary but not sufficient for "the mutation landed".** Sufficient = pointer advanced AND a follow-up read shows the change.
-- **Probe by throwing, never by printing.** `throw new Exception("PROBE:" + s);` returns `s` in `exceptionMessage`, saves nothing, leaves the pointer where it was, and still returns `validationMessages`. `Console`, `System.…` and reflection are rejected by the sandbox before compile.
+- **"Out file written + empty `exceptionMessage`" is necessary but not sufficient for "the mutation landed".** Sufficient = working copy moved AND a follow-up read shows the change.
+- **Probe by throwing, never by printing.** `throw new Exception("PROBE:" + s);` returns `s` in `exceptionMessage`, saves nothing, leaves the working copy where it was, and still returns `validationMessages`. `Console`, `System.…` and reflection are rejected by the sandbox before compile.
 - **Pass a full lambda, no `Save`.** The `examples/*.cs` files are already full `eSpace => { ... }` lambdas with no `eSpace.Save` — paste the lambda verbatim as `code` (and lift the file's `using` directives into `imports` — only `OutSystems.Model.*` namespaces are allowed there). The `code` must end with `}` (no trailing whitespace/newline/semicolon).
-- **Populated `exceptionMessage` (or an MCP tool error)** ⇒ the lambda ran and threw; no out file was written, so the input OML and the chain's last-good state are preserved automatically. Retry freely.
+- **Populated `exceptionMessage` (or an MCP tool error)** ⇒ the lambda ran and threw; no out file was written, so the working copy's last-good state is preserved automatically. Retry freely.
 - **An MCP tool error carrying `compilationErrors:` lines, or a sandbox / import rejection** ⇒ the lambda never ran and there is no result; no out file was written. Retry freely.
-- **`validationMessages` with a `type: "Error"` entry** ⇒ saved-but-invalid: the pointer advanced but the model has errors. Fix them.
-- **No `revertChanges` verb exists** — the host does not advance the pointer when no out file is written, so the input OML (and the chain's last-good state) is preserved for the error cases. For the silent no-op, the pointer DID advance but the saved bytes equal the input. To deliberately drop a successfully-built chain, call `omlReset` (see [`04-oml-reset.md`](04-oml-reset.md)). To surface a chain back into the IDE, call `omlMerge` with the `mutatedOmlPath` from the apply response so the user can review and accept it.
+- **`validationMessages` with a `type: "Error"` entry** ⇒ saved-but-invalid: the working copy moved but the model has errors. Fix them.
+- **No `revertChanges` verb exists** - the host does not move the working copy when no out file is written, so the last-good state is preserved for the error cases. For the silent no-op, the working copy DID move but the saved bytes equal the input. To deliberately drop unmerged work, call `endOmlEditSession` (see [`04-oml-reset.md`](04-oml-reset.md)). To surface the work into the IDE, call `omlMerge` with the `mutatedOmlPath` from the apply response so the user can review and accept it, and end the session when the task is done.

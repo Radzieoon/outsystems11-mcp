@@ -1,15 +1,16 @@
 ## 1. OMLs being worked on live in a temp folder
 
 ```
-%TEMP%\ServiceStudio.MCPServer\<runId>-in.oml     input snapshot
-%TEMP%\ServiceStudio.MCPServer\<runId>-out.oml    mutated result (successful writes only)
+%TEMP%\ServiceStudio.MCPServer\<runId>-in.oml     working copy checked out by startOmlEditSession (or a read snapshot outside a session)
+%TEMP%\ServiceStudio.MCPServer\<runId>-out.oml    the working copy after a successful write (the previous file is deleted)
 ```
 
-A clean `applyModelApiCode` returns the `-out.oml` path as `mutatedOmlPath`. That is
-the file to open by hand, or pass to `omlMerge`, if you need to recover a change.
+An edit session owns one file at a time. A clean `applyModelApiCode` returns the new `-out.oml` path
+as `mutatedOmlPath`. That is the file to open by hand, or pass to `omlMerge`, if you need to recover
+a change. `endOmlEditSession` deletes it (verified 2026-10-30).
 
-`omlReset` does **not** delete the oml file — a discarded chain stays on disk. A reset with
-nothing in flight does nothing at all.
+`omlReset` ends the edit session too but does **not** delete the oml file - a discarded working
+copy stays on disk. A reset with no session open does nothing at all.
 
 
 ## 2. Starting Service Studio wipes %TEMP%\ServiceStudio.MCPServer
@@ -20,21 +21,21 @@ Studio instances are running, so leftovers accumulate instead.
 
 ## 3. Your mid-chain edits are invisible to the agent
 
-The first `applyModelApiCode` takes a copy of your module and edits that; 
-your real module is untouched. Everything the agent reads afterwards comes off its
-copy, so anything you change in the UI meanwhile is invisible to it.
+`startOmlEditSession` takes a copy of your module and the agent edits that;
+your real module is untouched until a merge. Everything the agent reads while the session
+is open comes off its copy, so anything you change in the UI meanwhile is invisible to it.
 
-Two things put the agent back in sync, both by throwing that copy away so the next
-tool call takes a fresh one off your live module:
+Two things end the session, so the next read or `startOmlEditSession` takes a fresh copy
+off your live module:
 
-- `omlReset` — discards the chain outright.
-- `omlMerge` — opens the Compare-and-Merge window, then discards it.
+- `endOmlEditSession` - discards unmerged edits and deletes the copy.
+- `omlReset` - the same, but leaves the copy's file on disk.
 
-`omlMerge` discards the copy when the window **opens**, not when you accept. So a
-merge you reject or simply close still puts the agent back on your live module; its
-chain is gone from its side either way. The file itself is left on disk at the
-`mutatedOmlPath` you passed, so nothing is lost — pass that same path to `omlMerge`
-again to bring it back.
+`omlMerge` does **not** end the session (verified 2026-10-30): it copies the agent's
+file into your module, through the Compare-and-Merge window or silently per your
+setting, and the agent keeps working on its copy afterwards. A merge you cancel changes
+nothing on either side, and the agent can offer the same file again. The agent is asked
+to end the session when its task is done.
 
 
 ## 4. Each open module is tracked separately
