@@ -111,9 +111,9 @@ argument for it.
   `merged: false` with "The merge failed. See the log for details." see [`../SKILL.md`](../SKILL.md) § 3.1.
 - Under manual review the call blocks until the user decides, which may take minutes. Claude Code
   aborts a call silent for 300 s; the window stays open, the user's accept still lands, and only the
-  response is lost. Announce the window to the user before calling, raise the per-server `"timeout"`
-  in `.mcp.json` (this repo sets 1800000 ms), and after an aborted call ask the user what they chose
-  instead of re-merging.
+  response is lost. Announce the window to the user before calling, raise the client timeout
+  ([`../SKILL.md`](../SKILL.md) § 9), and after an aborted call ask the user what they chose instead
+  of re-merging.
 - The window lists one line you did not ask for: a `(System)` entity reference flagged "Reference
   has changed" (`Espace` or `Role` under `Dependencies > (System) > Entities > Database`). It is a
   side effect of the sidecar's save; tell the user to accept it with the rest. The window labels the

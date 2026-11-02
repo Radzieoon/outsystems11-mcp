@@ -94,9 +94,8 @@ differs from ODC's published examples in one important way (see § 1).
    Your client has a clock of its own: Claude Code aborts a call that stays silent for
    300 s (`sent no response or progress for 300s; aborting`), and a token approved after
    that abort never reaches you. Call `createSessionToken` again (a second dialog
-   appears), and when the user may be slow to answer, first raise the per-server
-   `"timeout"` in `.mcp.json` (this repo sets 1800000 ms) or
-   `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT` (verified 2026-10-30).
+   appears), and when the user may be slow to answer, first raise the client timeout
+   (§ 9; verified 2026-10-30).
 2. **Pass `sessionToken` as a top-level argument on every other call** —
    including `omlPublish`, `omlRefreshReferences` and `getRoleExceptions`:
    their schemas don't declare it, but send it anyway: each rejects a call without it ("This tool requires a valid session token"; `getRoleExceptions` verified 2026-10-01 and 2026-10-30, `omlPublish` 2026-10-17). If your client refuses to send a parameter missing from the schema, ask the user to publish or refresh from Service Studio.
@@ -508,7 +507,7 @@ See [`reference/mcp-session-pointer.md`](reference/mcp-session-pointer.md).
 > first.** Claude Code aborts a tool call silent for 300 s; the window stays open, the
 > user's accept still lands in the module, but the response is lost (verified
 > 2026-10-30 and 2026-10-20). Tell the user the window is coming before you call, and
-> raise the per-server `"timeout"` in `.mcp.json` (this repo sets 1800000 ms). If the
+> raise the client timeout (§ 9). If the
 > call was aborted, do not re-merge: ask the user what they chose, then verify with a
 > read after `endOmlEditSession`.
 >
@@ -930,10 +929,18 @@ Quick checklist (each already covered in detail above):
 is terminated if it exceeds the timeout (300 s for `applyModelApiCode`).
 
 Your MCP client has a clock of its own. Claude Code aborts a tool call that stays
-silent for 300 s, which `createSessionToken` (dialog unanswered) and `omlMerge` under
-manual review can both exceed; the server-side action completes anyway and only the
-response is lost (verified 2026-10-30). Raise the per-server `"timeout"` in `.mcp.json`
-(this repo sets 1800000 ms) or `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT`.
+silent for 300 s (its default for HTTP servers), which `createSessionToken` (dialog
+unanswered) and `omlMerge` under manual review can both exceed; the server-side action
+completes anyway and only the response is lost (verified 2026-10-30). Raise the
+per-server `"timeout"` (ms) on the entry your client actually loads, or set
+`CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT` (ms) for every server. Claude Code loads a
+project's `.mcp.json` entry (this repo sets 1800000 ms) only after the user approves
+that project's servers; until then an entry of the same name from the user's own
+configuration (user or local scope) is the one in use, and the `.mcp.json` value has
+no effect. `claude mcp get servicestudio` prints the scope in use. For a user-scope
+entry, run `claude mcp remove servicestudio -s user`, then
+`claude mcp add-json servicestudio '{"type":"http","url":"http://127.0.0.1:41820/mcp","timeout":1800000}' -s user`;
+new sessions pick it up (verified 2026-11-02, Claude Code 2.1.303).
 
 Because the snippet is arbitrary C# that runs with the host's privileges, treat
 `applyModelApiCode` as privileged: **use it only against modules you own**, and

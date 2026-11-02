@@ -34,7 +34,7 @@ disagree.
   The call waits for that approval with no signal to you, so tell the user to
   approve the request in Service Studio before you call it. Claude Code aborts a
   call silent for 300 s and a token approved later is lost: call again, and raise
-  the per-server `"timeout"` in `.mcp.json` first (this repo sets 1800000 ms).
+  the client timeout first (SKILL.md § 9).
   Pass it as a top-level `sessionToken` on every later call and reuse it across
   reconnects — never request a second one.
 - **Every tool except `listApps` wraps its arguments in `input`:**

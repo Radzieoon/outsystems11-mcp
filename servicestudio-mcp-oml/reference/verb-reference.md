@@ -45,11 +45,11 @@ Verified live against Service Studio 11 on 2026-09-30.
    tags it `x-mcp-header: SessionToken`). A call with no token, or a token this
    server didn't issue, is rejected. **Send it on every call**, including
    `omlPublish`, `omlRefreshReferences` and `getRoleExceptions` - their schemas don't declare it, but send it anyway: `getRoleExceptions` rejects a call without it (`-32002 This tool requires a valid session token. Call createSessionToken first and pass the returned value as the sessionToken argument.`, verified 2026-10-01 and 2026-10-30).
-4. **`createSessionToken` blocks until the user answers the dialog.** Claude Code aborts a
+3. **`createSessionToken` blocks until the user answers the dialog.** Claude Code aborts a
    call silent for 300 s and the token approved afterwards is lost; call again (a second
-   dialog appears). Raise the per-server `"timeout"` in `.mcp.json` first when the user may
-   be slow (this repo sets 1800000 ms; verified 2026-10-30).
-3. **Every tool except `listApps` wraps its own arguments in `input`:**
+   dialog appears). Raise the client timeout first when the user may be slow
+   ([`../SKILL.md`](../SKILL.md) § 9; verified 2026-10-30).
+4. **Every tool except `listApps` wraps its own arguments in `input`:**
 
 ```jsonc
 { "input": { "eSpaceName": "MyModule", "includeJson": "Never" }, "sessionToken": "<token>" }   // getDataModel
