@@ -114,7 +114,8 @@ checks each PR's state; once upstream merges one, its row says so and the next m
 
 ## Sync log
 
-One line per sync run. "Rows changed" names the D-rows whose status or "Fixed upstream?" cell the run changed.
+One line per sync run that finds a new upstream commit, a new Service Studio build or a changed PR state, or that runs a
+live check. "Rows changed" names the D-rows whose status or "Fixed upstream?" cell the run changed.
 
 | Date | Upstream `main` | Service Studio on disk | Rows changed | Live check |
 |---|---|---|---|---|
