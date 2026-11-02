@@ -120,3 +120,4 @@ live check. "Rows changed" names the D-rows whose status or "Fixed upstream?" ce
 | Date | Upstream `main` | Service Studio on disk | Rows changed | Live check |
 |---|---|---|---|---|
 | 2026-11-02 | `9f987e6`, no commits since 2026-10-30 | 11.55.94.65328 | none (file created from the 2026-10-30 report) | none |
+| 2026-11-02 | `8f36d5a`, 1 new commit (#13, property labels vs. model names; touches no D-row) | 11.55.94.65328 | none | none |
