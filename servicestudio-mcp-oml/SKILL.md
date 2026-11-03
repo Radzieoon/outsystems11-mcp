@@ -498,7 +498,9 @@ no dialog and returns right away.
 working copy, and you can merge again later, so a long task may merge intermediate
 checkpoints. A cancelled review returns `{ "merged": false, "message": "The merge was
 cancelled in the Compare and Merge window." }`; the file stays at `mutatedOmlPath` and
-the session stays open, so fix and merge again. Keep the last `mutatedOmlPath` until
+the session stays open, also when your client aborted the call before the user
+cancelled (verified 2026-11-03), so fix and merge again. Keep the last
+`mutatedOmlPath` until
 you end the session. Reads inside the session keep showing the working copy, not the
 live module: to see what Service Studio actually kept, read after `endOmlEditSession`.
 See [`reference/mcp-session-pointer.md`](reference/mcp-session-pointer.md).
@@ -511,12 +513,13 @@ See [`reference/mcp-session-pointer.md`](reference/mcp-session-pointer.md).
 > call was aborted, do not re-merge: ask the user what they chose, then verify with a
 > read after `endOmlEditSession`.
 >
-> **The window shows one extra line.** Next to your element it lists a `(System)`
+> **The window may show one extra line.** Next to your element it can list a `(System)`
 > entity reference under `Dependencies > (System) > Entities > Database` (`Espace`
-> or `Role`) flagged "Reference has changed", and it labels the live module "Your
-> changes" and your OML "The other version" (seen 2026-10-20 and 2026-10-30). The
-> extra line is a side effect of the sidecar's save, not something you did; tell the
-> user to accept it with the rest.
+> or `Role`) flagged "Reference has changed", at every merge until that change has
+> been merged once (seen 2026-10-20, 2026-10-30 and 2026-11-03). The window labels the
+> live module "Your changes" and your OML "The other version". The extra line is a
+> side effect of the sidecar's save, not something you did; tell the user to accept it
+> with the rest.
 
 > **After an automatic merge, an open flow canvas does not redraw** (verified
 > 2026-10-17). The model is updated — the properties panel and expression editor show
@@ -937,11 +940,13 @@ silent for 300 s (its default for HTTP servers), which `createSessionToken` (dia
 unanswered) and `omlMerge` under manual review can both exceed; the server-side action
 completes anyway and only the response is lost (verified 2026-10-30). Raise the
 per-server `"timeout"` (ms) on the entry your client actually loads, or set
-`CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT` (ms) for every server. Claude Code loads a
-project's `.mcp.json` entry (this repo sets 1800000 ms) only after the user approves
-that project's servers; until then an entry of the same name from the user's own
-configuration (user or local scope) is the one in use, and the `.mcp.json` value has
-no effect. `claude mcp get servicestudio` prints the scope in use. For a user-scope
+`CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT` (ms) for every server. Which entry that is depends
+on where Claude Code runs. In this repo, whose `.mcp.json` sets 1800000 ms and whose
+tracked `.claude/settings.json` approves that server, a desktop-app session used the
+`.mcp.json` entry: its connector status listed `servicestudio` as a project server
+(verified 2026-11-03). `claude mcp get servicestudio` in the CLI, in the same folder,
+reported the user-scope entry, "Scope: User config" (verified 2026-11-02). So check the
+entry in the client that runs the session, not in another one. For a user-scope
 entry, run `claude mcp remove servicestudio -s user`, then
 `claude mcp add-json servicestudio '{"type":"http","url":"http://127.0.0.1:41820/mcp","timeout":1800000}' -s user`;
 new sessions pick it up (verified 2026-11-02, Claude Code 2.1.303).

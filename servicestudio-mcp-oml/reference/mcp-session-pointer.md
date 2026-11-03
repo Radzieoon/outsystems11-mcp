@@ -107,17 +107,19 @@ argument for it.
   the next `applyModelApiCode` continues on the same working copy; merge again whenever you want a
   checkpoint in the module. The merged file stays on disk, and the same path can be passed again
   (a cancelled merge was retried with the same path and accepted on 2026-10-30).
-- `merged: false` with the cancel message leaves everything in place: fix, save, merge again. For
+- `merged: false` with the cancel message leaves everything in place, also when the client aborted
+  the call before the user cancelled (verified 2026-11-03): fix, save, merge again. For
   `merged: false` with "The merge failed. See the log for details." see [`../SKILL.md`](../SKILL.md) § 3.1.
 - Under manual review the call blocks until the user decides, which may take minutes. Claude Code
   aborts a call silent for 300 s; the window stays open, the user's accept still lands, and only the
   response is lost. Announce the window to the user before calling, raise the client timeout
   ([`../SKILL.md`](../SKILL.md) § 9), and after an aborted call ask the user what they chose instead
   of re-merging.
-- The window lists one line you did not ask for: a `(System)` entity reference flagged "Reference
-  has changed" (`Espace` or `Role` under `Dependencies > (System) > Entities > Database`). It is a
-  side effect of the sidecar's save; tell the user to accept it with the rest. The window labels the
-  live module "Your changes" and your OML "The other version".
+- The window may list one line you did not ask for: a `(System)` entity reference flagged "Reference
+  has changed" (`Espace` or `Role` under `Dependencies > (System) > Entities > Database`), at every
+  merge until that change has been merged once. It is a side effect of the sidecar's save; tell the
+  user to accept it with the rest. The window labels the live module "Your changes" and your OML
+  "The other version".
 
 Errors documented for the earlier server and not re-verified on 11.55.94: `MODULE_NOT_LOADED`
 (`eSpaceName` not open), `INVALID_ARGUMENT` (`mutatedOmlPath` empty, not a file this server produced,
