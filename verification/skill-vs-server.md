@@ -2,7 +2,7 @@
 
 Living file. The weekly sync run updates the discrepancy table when upstream commits or a new Service Studio build
 change a row, and adds a line to the sync log at the end; git history keeps the earlier states. Last full live
-verification: 2026-10-30, Service Studio 11.55.94.65328.
+verification: 2026-10-30, Service Studio 11.55.94.65328; targeted live check of D5: 2026-11-03.
 
 Companion to [`2026-09-30-claude-oml-tool-claims.md`](2026-09-30-claude-oml-tool-claims.md). That file checked the skill's
 claims about tool names, envelopes and response shapes. This file checks the **state model** the skill teaches (the
@@ -36,7 +36,7 @@ comes only from an earlier session on a large customer module (2026-10-20) and w
 | D2 | CONFIRMED | "Read tools auto-snapshot the live module on the first call and subsequently follow the session pointer" (§ 2) | Outside a session reads see the **live module**; the first sidecar read writes one `<runId>-in.oml` and later reads reuse it (one file survived four reads, 15:16:55); `startOmlEditSession` deletes that snapshot. Inside a session reads see the **working copy**, unmerged saves included (`getStructures` listed the new structure before any merge) | live | No | Reword § 2 and `verb-reference.md` intro |
 | D3 | CONFIRMED | `applyModelApiCode` "snapshots to `<runId>-in.oml`, allocates `<runId>-out.oml`"; superseded out files are "best-effort deleted" (§ 3; `mcp-session-pointer.md`; `mcp-design-choices.md` § 1) | `startOmlEditSession` writes `<runId>-in.oml` (14,059,721 B). Each clean `applyModelApiCode` writes a new `<runId>-out.oml` and **deletes the previous working-copy file**, so a session owns exactly one file at any moment. `endOmlEditSession` deletes it. `omlReset` leaves it behind (orphan until Service Studio restarts). The folder itself does not exist until first use (absent at 14:31 with Service Studio running since 07:16) | PowerShell listings of `%TEMP%\ServiceStudio.MCPServer` after every call | No | Describe the one-file working copy; keep the "folder wiped at startup" note |
 | D4 | CONFIRMED | `omlMerge` "clears that module's session pointer", "the chain does not continue past a merge", "a successful merge deletes that file, so a repeat fails with file-not-found" (§ 3.1; `verb-reference.md`; `mcp-session-pointer.md`; T4; `mcp-design-choices.md` § 3) | `omlMerge` **does not end the session and does not touch the working copy** (also stated in its live description). After the accepted merge a throw-probe and a further `applyModelApiCode` ran on the same working copy with no new start. The merged file stayed on disk after both the cancelled and the accepted merge; the **same path was merged twice** (cancelled, then accepted) | live 15:05-15:16; the accepted merge's response was lost to the client timeout (D9), the result was verified in the Service Studio tree and by an out-of-session `getStructures` | No | Rewrite § 3.1: merge as often as needed, end the session with `endOmlEditSession` |
-| D5 | MATCHES (+message) | "Nothing is lost when the merge doesn't succeed (the OML stays on disk)" (§ 3.1) | Cancel in the window returns `{"merged":false,"message":"The merge was cancelled in the Compare and Merge window."}`; file and session intact | live 15:05 | n/a | Quote the message. The 2026-10-20 session saw the `-out.oml` vanish after a cancel; not reproduced, that call had already been aborted client-side (D9) |
+| D5 | MATCHES (+message) | "Nothing is lost when the merge doesn't succeed (the OML stays on disk)" (§ 3.1) | Cancel in the window returns `{"merged":false,"message":"The merge was cancelled in the Compare and Merge window."}`; file and session intact. Also when the client stops the call while the window is open and the user cancels afterwards: file and session intact, and the same path opens the window again | live 2026-10-30 15:05; live 2026-11-03 12:56-12:59 (see "Live check 2026-11-03") | n/a | Quote the message. The 2026-10-20 session saw the `-out.oml` vanish after a client-side abort followed by a cancel; the same order on 2026-11-03 kept the file, so the abort alone does not explain it; cause unknown |
 | D6 | CONFIRMED | `omlReset` "drops the chain and re-snapshots the live module", "reversible within the session"; `discardedChanges:true` means "an unmerged chain was thrown away" (§ 3.1, § 8; `mcp-session-pointer.md`; `verb-reference.md`) | Inside a session `omlReset` returns `{"discardedChanges":true,"eSpaceName":...}` and **ends the edit session** (the next `applyModelApiCode` fails with "No OML edit session is started"); the last `-out.oml` stays on disk. Outside a session it returns `{"discardedChanges":false,...}` with no error. Bringing the orphan back through `omlMerge` was not tested | live 15:16 | No | Document `omlReset` as "ends the session, keeps the file"; recommend `endOmlEditSession` for a clean discard |
 | D7 | CONFIRMED | `discardedChanges: true` = work lost (`mcp-session-pointer.md`, SKILL.md § 3.1) | `endOmlEditSession` returned `false` after a session with no saves and `true` after a session with one unmerged save; the 2026-10-20 session saw `true` after a successful merge with nothing pending. So `true` means "the working copy had saves", not "work was lost" | live 15:18 (both cases); 2026-10-20 session (merged case) | No | State the real meaning |
 | D8 | CONFIRMED | `listApps` returns "the open module + its loaded references" (§ 2 table; `verb-reference.md`); example row has a `style` field (`module-style-support.md`) | Only the open module: `{"key","name","kind":"eSpace","version":"0","description","isOpen":true,"isReference":false,"moduleType":"Reactive"}`; no reference rows although the module references OutSystemsUI and others and the tool description promises them. `version` is `"0"` | live 14:42; the fork's own D10 (2026-09-30) and the 2026-10-20 session said the same | No | Fix both tables and the example row |
@@ -87,10 +87,35 @@ Times are local. Every row is one tool call unless marked "batch".
 Left behind on purpose: structure `MCP_SkillCheck_20261030` in the scratch module (unpublished, safe to delete) and one orphan
 `-out.oml` in `%TEMP%\ServiceStudio.MCPServer` (gone at the next Service Studio start).
 
+## Live check 2026-11-03 (D5)
+
+Service Studio 11.55.94.65328, write permission on manual review (`McpAutoMergeAndPublishAllowed` false in its settings
+file). A scratch Reactive Web module; a second module was open in the same Service Studio and was not touched. Client:
+Claude Code desktop app, whose connector status listed `servicestudio` as a project server, that is this repo's
+`.mcp.json` entry with `"timeout": 1800000`. Times are local. Window and file times come from a 0.5 s poll of the Service
+Studio windows and of `%TEMP%\ServiceStudio.MCPServer`; the stop time comes from the client transcript.
+
+| Time | Call or event | Result |
+|---|---|---|
+| 12:41 | `createSessionToken` | approval dialog 12:41:25-12:41:28, token returned |
+| 12:41 | `startOmlEditSession` | `{"started":true}`; one `-in.oml` (14,059,691 B) |
+| 12:42 | `applyModelApiCode` creates structure `MCP_D5Check_20261103` | the `-in.oml` replaced by one `<runId>-out.oml` (14,189,252 B), copied outside the folder |
+| 12:42:21 | `omlMerge` | window open 12:42:28; the planned client-side stop did not happen; user cancelled 12:47:14-12:47:18; cancel message as in D5 at 12:47:19; file intact |
+| 12:56:09 | `omlMerge` same path | window open 12:56:21, listing `(System) > ... > Espace` "Reference has changed"; **client stopped the call 12:56:30**; user cancelled 12:56:41-12:56:43; file intact (same size and time) |
+| 12:57:50 | throw-probe | session alive, structure present in the working copy; a second `-out.oml` (14,189,155 B) appeared and was deleted within 0.5 s; working copy unchanged |
+| 12:58:06 | `omlMerge` same path | window open again 12:58:24, same `(System)` line; user cancelled 12:59:06; cancel message as in D5 |
+| 12:59:24 | `endOmlEditSession` | `{"ended":true,"discardedChanges":true}`; folder empty |
+
+Nothing reached the module: all three merges were cancelled.
+
 ## Evidence from the 2026-10-20 session not reproduced live
 
-- `-out.oml` vanished after a cancelled merge (session journal, 2026-10-20). On 2026-10-30 the file stayed after a cancel that
-  completed inside the client timeout. That cancel followed a client-side abort; the difference may be the abort.
+- `-out.oml` vanished after a cancelled merge (session journal, 2026-10-20); there the client had aborted the call after
+  300 s with the window still open, and the user cancelled afterwards. On 2026-10-30 the file stayed after a cancel that
+  completed inside the client timeout. On 2026-11-03 the 2026-10-20 order was repeated on the scratch module (client stop
+  while the window was open, then cancel) and the file stayed too (D5). Differences left: the 2026-10-20 abort came from
+  the client's 300 s idle limit, not from a user stop; the module was a large customer module; what happened there after
+  the cancel was not recorded.
 - `discardedChanges: true` from `endOmlEditSession` right after a successful merge with nothing pending. Consistent with
   D7 ("the working copy had saves"); not repeated to avoid a third merge window.
 - Validation payload of 53 k characters (D10). The sandbox module is too small to reproduce the overflow.
@@ -121,3 +146,4 @@ live check. "Rows changed" names the D-rows whose status or "Fixed upstream?" ce
 |---|---|---|---|---|
 | 2026-11-02 | `9f987e6`, no commits since 2026-10-30 | 11.55.94.65328 | none (file created from the 2026-10-30 report) | none |
 | 2026-11-02 | `8f36d5a`, 1 new commit (#13, property labels vs. model names; touches no D-row) | 11.55.94.65328 | none | none |
+| 2026-11-03 | `8f36d5a`, no commits since 2026-11-02 | 11.55.94.65328 | none | D5 scenario (client stop while the Compare-and-Merge window was open, then cancel): file kept; see "Live check 2026-11-03" |
