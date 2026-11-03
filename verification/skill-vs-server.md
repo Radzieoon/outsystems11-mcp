@@ -100,7 +100,7 @@ Studio windows and of `%TEMP%\ServiceStudio.MCPServer`; the stop time comes from
 | 12:41 | `createSessionToken` | approval dialog 12:41:25-12:41:28, token returned |
 | 12:41 | `startOmlEditSession` | `{"started":true}`; one `-in.oml` (14,059,691 B) |
 | 12:42 | `applyModelApiCode` creates structure `MCP_D5Check_20261103` | the `-in.oml` replaced by one `<runId>-out.oml` (14,189,252 B), copied outside the folder |
-| 12:42:21 | `omlMerge` | window open 12:42:28; the planned client-side stop did not happen; user cancelled 12:47:14-12:47:18; cancel message as in D5 at 12:47:19; file intact |
+| 12:42:21 | `omlMerge` | window open 12:42:28; the planned client-side stop did not happen (Esc was pressed in Service Studio, not in the client); user cancelled 12:47:14-12:47:18; cancel message as in D5 at 12:47:19; file intact |
 | 12:56:09 | `omlMerge` same path | window open 12:56:21, listing `(System) > ... > Espace` "Reference has changed"; **client stopped the call 12:56:30**; user cancelled 12:56:41-12:56:43; file intact (same size and time) |
 | 12:57:50 | throw-probe | session alive, structure present in the working copy; a second `-out.oml` (14,189,155 B) appeared and was deleted within 0.5 s; working copy unchanged |
 | 12:58:06 | `omlMerge` same path | window open again 12:58:24, same `(System)` line; user cancelled 12:59:06; cancel message as in D5 |
