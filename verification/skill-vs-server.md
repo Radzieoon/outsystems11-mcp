@@ -52,8 +52,9 @@ comes only from an earlier session on a large customer module (2026-10-20) and w
 | D18 | CONFIRMED (partly) | `getSerializedObjectByKey` fetches "by key" (`verb-reference.md`) | The `key` that `listApps` returns is rejected `[-32602] Object with key '...' not found`; the module's model key from `runQuery Root { Key }` is a different GUID. The 2026-10-20 session: local element keys rejected too | live 14:45; 2026-10-20 session | No | Note which keys the tool does not accept |
 | D19 | UNCONFIRMED | `omlRefreshReferences` "drops the session pointer" (§ 3.2; `verb-reference.md`; adapters; `integration-examples/03`) | Not called (only on explicit request). Behaviour with an open edit session unknown | none on 2026-10-30 | No | Reword as "verified 2026-09-30 under the pointer model; not re-verified with edit sessions" |
 | D20 | UNCONFIRMED | `omlPublish` returns `blocked` until the write permission is granted; needs the token (§ 3.2, `2fafeda`) | Not called (never publish). Live schema: `input.eSpaceName` only; description matches the skill | live `tools/list` | Yes (`2fafeda`, 2026-10-17) | none |
-| D21 | UNCONFIRMED | Menu "Edit > MCP Server" (README, `515b6df`); permission "allow automatic merge and publish" (§ 3.2) | The 2026-10-20 session on the same build: menu "Edit > MCP Configuration...", one "Write permissions" (Beta) setting with "Manual review changes in compare and merge" / "Allow automatically merge and publish". Not checked on 2026-10-30 | screenshots of the 2026-10-20 session | `515b6df` changed the label the other way | Ask the user to read both texts off the dialog before changing the README |
+| D21 | MATCHES (menu); UNCONFIRMED (permission texts) | Menu "Edit > MCP Server" (README, `515b6df`); permission "allow automatic merge and publish" (§ 3.2) | Menu read off Service Studio 11.55.94 on 2026-11-04: `Edit > MCP Server...`, then `Start MCP Server`; the Edit menu has no "MCP Configuration..." item, so the 2026-10-20 label was wrong. Write-permission texts as in the 2026-10-20 session: one "Write permissions" (Beta) setting with "Manual review changes in compare and merge" / "Allow automatically merge and publish"; not read since | user's reading 2026-11-04; screenshots of the 2026-10-20 session | `515b6df` has the right label | Ask the user to read the write-permission texts off the dialog before changing § 3.2 |
 | D22 | CONFIRMED | `getRoleExceptions` works with the token (empty) (`verb-reference.md`, 2026-10-01) | Still true when called alone (see D16 for the parallel failure) | live 14:46 | n/a | add date |
+| D23 | CONFIRMED (handshake: one observation) | "You get an 'allow this agent?' prompt on every MCP handshake, including reconnects" (`reference/mcp-design-choices.md` § 5) | The dialog, titled "Allow AI agent to connect?", comes with each `createSessionToken` call, and a second call shows a second dialog. A bare handshake (`claude mcp get servicestudio` from the CLI) connected in about 2 s and showed no dialog, with the server running since the previous day | live 2026-10-30 14:31 and 14:42 (D9); 2026-11-03 12:41 (window poll); 2026-11-04 07:18 (user watching) | No | Rewrite § 5 as one approval per `createSessionToken` call (done in the overlay) |
 
 ## Live run log 2026-10-30 (condensed)
 
@@ -122,7 +123,7 @@ Nothing reached the module: all three merges were cancelled.
 
 ## Open items
 
-1. Read the exact menu label and the write-permission texts off Service Studio (D21) before touching the README.
+1. Read the write-permission texts off Service Studio (D21) before touching § 3.2; the menu label matches the README (2026-11-04).
 2. Re-verify `omlRefreshReferences` with an open edit session (D19), only on explicit request.
 
 Decided 2026-11-02: `omlReset` stays documented as a tool, with the advice to prefer `endOmlEditSession` (D6). The
