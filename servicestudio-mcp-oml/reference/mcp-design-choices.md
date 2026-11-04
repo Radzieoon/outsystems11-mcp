@@ -46,10 +46,13 @@ Chains on different modules do not interfere. A module can sit on an unmerged co
 indefinitely — merge or reset it explicitly.
 
 
-## 5. Every connection needs approval
+## 5. Every agent session needs approval
 
-You get an "allow this agent?" prompt on every MCP handshake, including reconnects
-of an agent you already approved. Per-connection, by design.
+Service Studio shows an "Allow AI agent to connect?" dialog for each `createSessionToken`
+call, and the call returns the token only after the user approves it. A bare MCP handshake
+showed no dialog (Service Studio 11.55.94, 2026-11-04, one observation), and a second
+`createSessionToken` shows a second dialog, so get one token per agent session and reuse it
+across reconnects.
 
 
 ## 6. Loopback-only, but it runs arbitrary C#
