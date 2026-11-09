@@ -136,7 +136,7 @@ checks each PR's state; once upstream merges one, its row says so and the next m
 
 | PR | Branch | Change | State (checked) |
 |---|---|---|---|
-| [OutSystems/outsystems11-mcp#6](https://github.com/OutSystems/outsystems11-mcp/pull/6) | `fix/mcp-design-choices-link` | moves `MCP-DESIGN-CHOICES.md` to `servicestudio-mcp-oml/reference/mcp-design-choices.md`, so the SKILL.md § 6 link works in an installed skill | open, review required (2026-11-02) |
+| [OutSystems/outsystems11-mcp#6](https://github.com/OutSystems/outsystems11-mcp/pull/6) | `fix/mcp-design-choices-link` | moves `MCP-DESIGN-CHOICES.md` to `servicestudio-mcp-oml/reference/mcp-design-choices.md`, so the SKILL.md § 6 link works in an installed skill | open, review required (2026-11-09) |
 
 ## Sync log
 
@@ -148,3 +148,4 @@ live check. "Rows changed" names the D-rows whose status or "Fixed upstream?" ce
 | 2026-11-02 | `9f987e6`, no commits since 2026-10-30 | 11.55.94.65328 | none (file created from the 2026-10-30 report) | none |
 | 2026-11-02 | `8f36d5a`, 1 new commit (#13, property labels vs. model names; touches no D-row) | 11.55.94.65328 | none | none |
 | 2026-11-03 | `8f36d5a`, no commits since 2026-11-02 | 11.55.94.65328 | none | D5 scenario (client stop while the Compare-and-Merge window was open, then cancel): file kept; see "Live check 2026-11-03" |
+| 2026-11-09 | `8f36d5a`, no commits since 2026-11-03 | 11.55.95.65352 (new build) | none | proposed (new Service Studio build) |
