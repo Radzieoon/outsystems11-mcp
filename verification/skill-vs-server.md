@@ -26,7 +26,7 @@ Every host call after the first batch was made **one at a time** (see D16).
 
 Status legend: **CONFIRMED** = observed live on 2026-10-30; **MATCHES** = the skill's claim held live; **DOC-ONLY** = evidence
 comes only from an earlier session on a large customer module (2026-10-20) and was not reproduced live; **UNCONFIRMED** = not tested
-(rules of the test forbade the call, or the user's confirmation is still pending).
+(rules of the test forbade the call, or the user's confirmation is still pending). **CONFIRMED (offline)** = reproduced with a script on a graph reconstructed from a live read-back, not in Service Studio.
 
 ## Discrepancy table
 
@@ -55,6 +55,7 @@ comes only from an earlier session on a large customer module (2026-10-20) and w
 | D21 | MATCHES (menu); UNCONFIRMED (permission texts) | Menu "Edit > MCP Server" (README, `515b6df`); permission "allow automatic merge and publish" (§ 3.2) | Menu read off Service Studio 11.55.94 on 2026-11-04: `Edit > MCP Server...`, then `Start MCP Server`; the Edit menu has no "MCP Configuration..." item, so the 2026-10-20 label was wrong. Write-permission texts as in the 2026-10-20 session: one "Write permissions" (Beta) setting with "Manual review changes in compare and merge" / "Allow automatically merge and publish"; not read since | user's reading 2026-11-04; screenshots of the 2026-10-20 session | `515b6df` has the right label | Ask the user to read the write-permission texts off the dialog before changing § 3.2 |
 | D22 | CONFIRMED | `getRoleExceptions` works with the token (empty) (`verb-reference.md`, 2026-10-01) | Still true when called alone (see D16 for the parallel failure) | live 14:46 | n/a | add date |
 | D23 | CONFIRMED (handshake: one observation) | "You get an 'allow this agent?' prompt on every MCP handshake, including reconnects" (`reference/mcp-design-choices.md` § 5) | The dialog, titled "Allow AI agent to connect?", comes with each `createSessionToken` call, and a second call shows a second dialog. A bare handshake (`claude mcp get servicestudio` from the CLI) connected in about 2 s and showed no dialog, with the server running since the previous day | live 2026-10-30 14:31 and 14:42 (D9); 2026-11-03 12:41 (window poll); 2026-11-04 07:18 (user watching) | No | Rewrite § 5 as one approval per `createSessionToken` call (done in the overlay) |
+| D24 | CONFIRMED (offline) | The full layout pass ends with "a final check that no two nodes share a grid cell and no forward edge points upward" (SKILL.md § 3.1; `reference/model-api-tips.md` § "The validated layout pass"; `examples/LayoutActionFlow.cs`) | Not a server behaviour: the recipe's own gap. A new server action built in one edit session (about 40 nodes, three sequential For Each loops, each body an If to 2-3 action calls and a log call, plus an exception handler) passed that check and was unreadable on the canvas; the developer re-laid it out by hand after the merge. Cause: the pass drops loop-back edges for placement, which also drops the only link between a body and the loop's exit, so each exit, and with it the next loop, landed one row under its For Each. The three For Each nodes ended up on consecutive rows, the later bodies were pushed right onto the earlier bodies' rows, each later cycle connector ran horizontally through an earlier body's node and the main flow sat beside the first body. No cell was shared and no forward edge pointed up | positions read back from the live module right after the merge (2026-11-09 17:16, client project, not reproduced here); offline check 2026-11-09, see "Offline check 2026-11-09 (D24)" | No | Exit of a For Each below its body's deepest node; check extended with loop-block bounding boxes and connectors through nodes (done in the overlay); live check on a scratch module still open |
 
 ## Live run log 2026-10-30 (condensed)
 
@@ -109,6 +110,24 @@ Studio windows and of `%TEMP%\ServiceStudio.MCPServer`; the stop time comes from
 
 Nothing reached the module: all three merges were cancelled.
 
+## Offline check 2026-11-09 (D24)
+
+Input: the node list (kind, position, outgoing connectors, If/Switch/For Each targets) of the failed flow, read back from the live
+module right after the merge. Only node kinds and connector structure were used; names stay in the client project. Two harnesses: a
+Python port of the pass and checks, and the C# lambdas of `examples/LayoutActionFlow.cs` (the `HEAD` version and the new one) compiled
+against stub `OutSystems.Model.Logic.Nodes` interfaces with the .NET 8 SDK and run on the same graph.
+
+| Run | Result |
+|---|---|
+| previous lambda on the graph | positions equal to the agent's layout for 39 of 39 nodes (comment node excluded), so the agent ran the documented pass; old check passes |
+| new check on those positions | fails: the three loop boxes hold 6, 14 and 15 foreign nodes; two cycle connectors run through 3 nodes of earlier bodies; one If-to-For Each loop-back runs through a node of another loop |
+| new lambda on the graph | check passes; the three loops occupy rows 7-13, 14-19 and 20-25, column 0 stays empty beside each body, the main flow continues at row 26 |
+| synthetic flows | the 2026-10-17 shape (If merge, 3-way Switch, one For Each, handler) passes with both versions; nested loops, and a loop with an early exit followed by a second loop, fail the new check with the old placement and pass it with the new one |
+
+Not covered: how Service Studio draws the result (straight connectors are assumed, which matches the absence of a waypoint API), and
+label width. Column spacing is 1828 units and long action names are wider than an icon, so labels of neighbouring columns can still
+touch; the check works in grid cells and does not see that.
+
 ## Evidence from the 2026-10-20 session not reproduced live
 
 - `-out.oml` vanished after a cancelled merge (session journal, 2026-10-20); there the client had aborted the call after
@@ -125,6 +144,7 @@ Nothing reached the module: all three merges were cancelled.
 
 1. Read the write-permission texts off Service Studio (D21) before touching § 3.2; the menu label matches the README (2026-11-04).
 2. Re-verify `omlRefreshReferences` with an open edit session (D19), only on explicit request.
+3. Run the new layout pass live on a scratch module with sequential loops and look at the canvas (D24), with the user's go-ahead.
 
 Decided 2026-11-02: `omlReset` stays documented as a tool, with the advice to prefer `endOmlEditSession` (D6). The
 `.mcp.json` `"timeout"` stays in this fork; no upstream PR for now (D9).

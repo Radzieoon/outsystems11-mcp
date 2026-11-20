@@ -73,7 +73,7 @@ loop.Target = end;              // exit path
 
 - Address the current row through the list: `<Source>.List.Current…`.
 - Optional: `SetStartIndex(...)`, `SetMaximumIterations(...)`.
-- In the layout pass, the body goes one column right on the For Each's row ([`model-api-tips.md`](model-api-tips.md) § "The validated layout pass").
+- In the layout pass, the body goes one column right on the For Each's row, and the exit goes below the body's deepest node, so a second loop starts below the first one's block ([`model-api-tips.md`](model-api-tips.md) § "The validated layout pass").
 
 ## Exception handlers
 

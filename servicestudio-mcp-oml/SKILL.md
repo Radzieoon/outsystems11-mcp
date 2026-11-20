@@ -575,9 +575,14 @@ before the task counts as complete. How depends on who drew the flow:
 - **A flow you created in this task** gets the **full layout pass**:
   - a branch-aware walk from the Start node that places each If, Switch and For Each
     branch in its own column and puts merge points below their deepest branch;
+  - each For Each laid out as a block: its body to the right, its exit (and so the next
+    loop) below the body's deepest node, never beside the body;
   - `Connected*` helpers preferred over setting `Target` by hand;
   - a splice-link read-back;
-  - a final check that no two nodes share a grid cell and no forward edge points upward.
+  - a final check that no two nodes share a grid cell, no forward edge points upward, no
+    other node sits inside a loop block's bounding box, and no connector runs through a
+    node. A cell check alone passed a new action with three sequential loops whose bodies
+    were interleaved and unreadable (2026-11-09).
 - **An existing flow you edited keeps the developer's layout. Don't re-run the full
   pass on it**, because that would rearrange their branches. Insert locally: shift every
   node at or below the insertion row down by one row of the flow's own spacing, put the

@@ -48,6 +48,8 @@
 #     MainContent (scenario_22), local insertion that keeps an existing
 #     flow's layout (scenario_23), and a whole-module summary from one
 #     inventory probe (scenario_24).
+#   - scenario_25 (2026-11-09): a new action with sequential For Each loops
+#     laid out as separate blocks, checked for more than shared cells.
 
 test_type: "effectiveness"
 name: "servicestudio-mcp-oml effectiveness"
@@ -999,3 +1001,32 @@ scenario_24:
 
       - point: "Avoids getDataModel for orientation on a large module"
         description: "The response notes that `getDataModel` on a large module can be very large (100k+ characters) and reserves it, or the per-element getters, for drilling into the parts that need detail."
+
+scenario_25:
+  name: "new_action_sequential_loops_layout"
+
+  codebase:
+    files: []
+
+  prompt: |
+    Module `MyModule` is open in Service Studio and I'm driving it through the
+    Service Studio MCP Server. Create a new server action `ProcessQueues` that runs
+    three For Each loops one after another, over `GetOrders.List`,
+    `GetInvoices.List` and `GetPayments.List`. Each loop body has an If that calls
+    one of two actions and then logs a message before cycling back. Show the
+    `applyModelApiCode` lambda and explain how you lay out the flow before merging.
+
+  validation:
+    prerequisites:
+      - point: "Provides a lambda"
+        description: "The response contains a full `eSpace => { ... }` lambda that creates the action with three For Each nodes in sequence."
+
+    skill_scoring:
+      - point: "Runs the full layout pass on the new flow"
+        description: "The response lays out the new action with the branch-aware layout pass (as in examples/LayoutActionFlow.cs), not by relying on `ArrangeAllNodes()` or on the host's auto arrange log line."
+
+      - point: "Lays out each loop as a block"
+        description: "The response places each For Each's exit (and so the next loop) below the deepest node of the previous loop's body, not one row under the For Each, so the three loop bodies do not share rows or sit beside each other."
+
+      - point: "Checks more than shared cells"
+        description: "The completion check the response runs or describes goes beyond 'no two nodes share a cell': it also rejects other nodes inside a loop block's bounding box and/or connectors that run through a node, and it does not merge when the check fails."
