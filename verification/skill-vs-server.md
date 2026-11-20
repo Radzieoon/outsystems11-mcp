@@ -192,4 +192,4 @@ live check. "Rows changed" names the D-rows whose status or "Fixed upstream?" ce
 | 2026-11-02 | `8f36d5a`, 1 new commit (#13, property labels vs. model names; touches no D-row) | 11.55.94.65328 | none | none |
 | 2026-11-03 | `8f36d5a`, no commits since 2026-11-02 | 11.55.94.65328 | none | D5 scenario (client stop while the Compare-and-Merge window was open, then cancel): file kept; see "Live check 2026-11-03" |
 | 2026-11-09 | `8f36d5a`, no commits since 2026-11-03 | 11.55.95.65352 (new build) | none | proposed (new Service Studio build) |
-| 2026-11-20 | `be8e730` fetched, 1 new commit (#16, edit sessions and module tools), not yet merged into the overlay in this run | 11.55.97.65412 (new build, first seen 2026-11-16) | D7, D8, D21, D24 | D24 fix verified on the canvas; D21 dialog texts read; see "Live check 2026-11-20 (D24, D21)" |
+| 2026-11-20 | `8f36d5a` still the last merged; `be8e730` (#16, edit sessions and module tools) seen upstream and left for the next sync run | 11.55.97.65412 (new build, first seen 2026-11-16) | D7, D8, D21, D24 | D24 fix verified on the canvas; D21 dialog texts read; see "Live check 2026-11-20 (D24, D21)" |
