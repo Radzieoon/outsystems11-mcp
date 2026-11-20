@@ -213,6 +213,64 @@ checks each PR's state; once upstream merges one, its row says so and the next m
 |---|---|---|---|
 | [OutSystems/outsystems11-mcp#6](https://github.com/OutSystems/outsystems11-mcp/pull/6) | `fix/mcp-design-choices-link` | moves `MCP-DESIGN-CHOICES.md` to `servicestudio-mcp-oml/reference/mcp-design-choices.md`, so the SKILL.md § 6 link works in an installed skill | closed without merge 2026-11-20 (checked 2026-11-20); the same move landed upstream in `be8e730` |
 
+## What the overlay carries
+
+Every fix the overlay holds over upstream `main`, one line per place, as `row  path  ::  anchor`. The anchor is a phrase
+that `git grep -F` finds in that file on `skill-overlay` and not on `main`. After each merge of `main` the sync run checks
+every line: an anchor that is gone means the merge dropped that fix, unless upstream now says the same thing (then the line
+goes, and the D-row's "Fixed upstream?" cell says so). Lines are added with each new overlay fix and removed when upstream
+takes the fix over. Built 2026-11-20 from the diff of `e8d149e` against `be8e730`.
+
+```text
+D7   servicestudio-mcp-oml/SKILL.md  ::  the flag says only that the
+D7   servicestudio-mcp-oml/reference/verb-reference.md  ::  it is `true` whenever the working copy had saves
+D7   servicestudio-mcp-oml/integration-examples/01-add-entity-via-mcp.md  ::  there the flag means only that the working copy had saves
+D8   servicestudio-mcp-oml/SKILL.md  ::  `listApps` returned only the open module, with no reference rows
+D8   servicestudio-mcp-oml/reference/verb-reference.md  ::  with no reference rows and no `tabId`, despite its tool description
+D8   servicestudio-mcp-oml/reference/module-discovery.md  ::  no reference rows came back at all
+D9   servicestudio-mcp-oml/SKILL.md  ::  Your client has a clock of its own
+D9   servicestudio-mcp-oml/SKILL.md  ::  Under manual review the call waits for the user, and your client may give up
+D9   servicestudio-mcp-oml/SKILL.md  ::  Your MCP client has a clock of its own
+D9   servicestudio-mcp-oml/reference/verb-reference.md  ::  blocks until the user answers the dialog
+D9   servicestudio-mcp-oml/reference/verb-reference.md  ::  Claude Code aborts after 300 s of silence while the merge still completes
+D9   servicestudio-mcp-oml/reference/mcp-session-pointer.md  ::  Your client may give up first
+D9   servicestudio-mcp-oml/reference/mcp-design-choices.md  ::  Your MCP client has a limit of its own
+D9   servicestudio-mcp-oml/integration-examples/01-add-entity-via-mcp.md  ::  make sure your client's tool timeout allows it
+D9   AGENTS.md  ::  a token approved later is lost
+D9   AGENTS.md  ::  merge waits for the
+D9   .github/copilot-instructions.md  ::  a token approved later is lost
+D9   .github/copilot-instructions.md  ::  make sure your client's tool timeout allows it
+D9   .github/chatmodes/servicestudio-mcp-oml.chatmode.md  ::  a token approved later is lost
+D9   .github/chatmodes/servicestudio-mcp-oml.chatmode.md  ::  after an abort, ask the
+D9   .github/prompts/oml-edit.prompt.md  ::  make sure your client's tool timeout allows it
+D9   .mcp.json  ::  "timeout": 1800000
+D10  servicestudio-mcp-oml/SKILL.md  ::  alone can exceed your client's inline result
+D10  servicestudio-mcp-oml/reference/lambda-contract.md  ::  the whole module's list
+D10  AGENTS.md  ::  the whole module's
+D10  .github/copilot-instructions.md  ::  the whole module's
+D11  servicestudio-mcp-oml/reference/verb-reference.md  ::  `Screens`, `Blocks` and `UIFlows` are **not** fields
+D12  .github/chatmodes/servicestudio-mcp-oml.chatmode.md  ::  but a call without it is rejected
+D15  servicestudio-mcp-oml/SKILL.md  ::  The window may show one extra line
+D15  servicestudio-mcp-oml/reference/mcp-session-pointer.md  ::  The window may list a `(System)` entity reference
+D16  servicestudio-mcp-oml/SKILL.md  ::  while another call to the same server is still in flight
+D16  servicestudio-mcp-oml/reference/verb-reference.md  ::  while another call is in flight
+D16  servicestudio-mcp-oml/reference/mcp-session-pointer.md  ::  while another call is in flight
+D16  AGENTS.md  ::  is in flight: call host tools one at a time
+D16  .github/copilot-instructions.md  ::  is in flight: call host tools one at a time
+D16  .github/chatmodes/servicestudio-mcp-oml.chatmode.md  ::  while another call is in flight
+D17  servicestudio-mcp-oml/SKILL.md  ::  Data sources that reach the browser
+D17  servicestudio-mcp-oml/reference/verb-reference.md  ::  Data sources that reach the browser
+D18  servicestudio-mcp-oml/SKILL.md  ::  is not a model key
+D18  servicestudio-mcp-oml/reference/verb-reference.md  ::  is not one and fails with
+D23  servicestudio-mcp-oml/reference/mcp-design-choices.md  ::  Every agent session needs approval
+D24  servicestudio-mcp-oml/SKILL.md  ::  each For Each laid out as a block
+D24  servicestudio-mcp-oml/SKILL.md  ::  sits inside a loop block's bounding box
+D24  servicestudio-mcp-oml/effectiveness.yml  ::  scenario_28:
+D24  servicestudio-mcp-oml/examples/LayoutActionFlow.cs  ::  A loop's body: what the cycle reaches before coming back
+D24  servicestudio-mcp-oml/reference/model-api-tips.md  ::  Lay out each For Each as a block.
+D24  servicestudio-mcp-oml/reference/logic-and-integrations.md  ::  and the exit goes below the body's deepest node
+```
+
 ## Sync log
 
 One line per sync run that finds a new upstream commit, a new Service Studio build or a changed PR state, or that runs a
