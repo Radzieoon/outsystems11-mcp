@@ -48,7 +48,14 @@
 #     MainContent (scenario_22), local insertion that keeps an existing
 #     flow's layout (scenario_23), and a whole-module summary from one
 #     inventory probe (scenario_24).
-#   - scenario_25 (2026-11-09): a new action with sequential For Each loops
+#   - scenarios 25-27 cover choosing the module: finding, opening and
+#     closing one the user names that isn't open (scenario_25),
+#     resolving MODULE_AMBIGUOUS by tabId instead of guessing (scenario_26),
+#     and carrying the environment the user picked from searchApps into
+#     openModule when Studio is logged in to several (scenario_27).
+#     They were written from the Service Studio MCP server source, not yet
+#     verified live.
+#   - scenario_28 (2026-11-09): a new action with sequential For Each loops
 #     laid out as separate blocks, checked for more than shared cells.
 
 test_type: "effectiveness"
@@ -67,7 +74,7 @@ scenario_1:
     Using Service Studio's in-process MCP Server, write the
     `applyModelApiCode` call that adds a `Customer` server entity with a
     `Name` text attribute (length 200) to the open module `MyModule`. You
-    already hold a session token and an open edit session on `MyModule`. Show the JSON payload you would send to
+    already hold a session token. Show the JSON payload you would send to
     the tool, and describe the very next tool call you would make after
     this one succeeds.
 
@@ -92,8 +99,8 @@ scenario_1:
       - point: "Uses literal identifier `eSpace`"
         description: "The lambda parameter and all method calls use the identifier `eSpace` (not `m`, `app`, `model`, or any rename). The host's injected save is hardcoded to `eSpace`; any other identifier fails to compile with CS0103."
 
-      - point: "Next call is a verify read with `getDataModel`, then `omlMerge`, then `endOmlEditSession`"
-        description: "The response says the next step after a successful mutation is to re-read with `getDataModel` (or the matching `get*`) to confirm the change landed (a clean response is not proof of mutation - silent-no-op trap), then to finalise by calling `omlMerge` with the `mutatedOmlPath` returned by the apply call, and to close the edit session with `endOmlEditSession`. It should NOT claim the path is unavailable or that merging can only happen through the Service Studio UI."
+      - point: "Next call is a verify read with `getDataModel`, then `omlMerge`"
+        description: "The response says the next step after a successful mutation is to re-read with `getDataModel` (or the matching `get*`) to confirm the change landed (a clean response is not proof of mutation — silent-no-op trap), then to finalise by calling `omlMerge` with the `mutatedOmlPath` returned by the apply call. It should NOT claim the path is unavailable or that merging can only happen through the Service Studio UI."
 
       - point: "Payload uses the `input` envelope plus `sessionToken`"
         description: "The JSON payload is shaped `{ \"input\": { \"eSpaceName\": \"MyModule\", \"code\": \"…\", \"imports\": [...] }, \"sessionToken\": \"<token>\" }` — `code`, `imports` and `eSpaceName` nested inside `input` (all three present; `imports` may be `[]`) and the token as a top-level sibling. A flat `{ \"code\": …, \"imports\": … }` payload, or one with no `sessionToken`, is the WRONG answer under the current contract."
@@ -154,7 +161,7 @@ scenario_3:
   validation:
     prerequisites:
       - point: "Names the MCP tools"
-        description: "The sequence uses `listApps`, `getDataModel`, `startOmlEditSession`, `applyModelApiCode`, `omlMerge` and `endOmlEditSession` (in some sensible order), not UI clicks or REST endpoints."
+        description: "The sequence uses `listOpenModules` (or `listApps`, its name on older builds), `getDataModel`, `applyModelApiCode` and `omlMerge` (in some sensible order), not UI clicks or REST endpoints."
 
       - point: "Shows JSON arguments per call"
         description: "Each call is shown with a concrete JSON arguments object."
@@ -166,8 +173,8 @@ scenario_3:
       - point: "Passes `sessionToken` as a top-level argument"
         description: "Every later call carries `\"sessionToken\": \"<token>\"` as a top-level argument, a sibling of `input` — not nested inside `input`, and not omitted."
 
-      - point: "`listApps` takes only the token, no `input`"
-        description: "The `listApps` call is `{ \"sessionToken\": \"<token>\" }` with no `input` wrapper, and the style is read from each row's `moduleType` field (e.g. `\"Reactive\"`). Reading a `style` field is the WRONG answer."
+      - point: "`listOpenModules` takes only the token, no `input`"
+        description: "The `listOpenModules` call (`listApps` on older builds) is `{ \"sessionToken\": \"<token>\" }` with no `input` wrapper, and the style is read from each row's `moduleType` field (e.g. `\"Reactive\"`). Reading a `style` field is the WRONG answer."
 
       - point: "Every other tool wraps its arguments in `input`"
         description: "`getDataModel` is `{ \"input\": { \"eSpaceName\": \"MyModule\", \"includeJson\": \"Never\" }, \"sessionToken\": … }` and `applyModelApiCode` is `{ \"input\": { \"eSpaceName\": \"MyModule\", \"code\": \"eSpace => { … }\", \"imports\": [...] }, \"sessionToken\": … }` with all three `input` fields present. Flat arguments (e.g. `{ \"code\": …, \"imports\": … }` or `{ \"includeJson\": \"Never\" }`) are the WRONG answer."
@@ -175,8 +182,8 @@ scenario_3:
       - point: "`omlMerge` puts both `eSpaceName` and `mutatedOmlPath` inside `input`"
         description: "The merge call is `{ \"input\": { \"eSpaceName\": \"MyModule\", \"mutatedOmlPath\": \"<path from the apply response>\" }, \"sessionToken\": … }`. Sending `mutatedOmlPath` flat, or omitting `eSpaceName`, is the WRONG answer."
 
-      - point: "Opens and closes the edit session"
-        description: "`startOmlEditSession` (`{ \"input\": { \"eSpaceName\": \"MyModule\" }, \"sessionToken\": … }`) comes before the first `applyModelApiCode`, and `endOmlEditSession` (same shape) comes after `omlMerge`. Calling `applyModelApiCode` with no session open is the WRONG answer: the server rejects it with `No OML edit session is started`. Ending the session before the merge is also WRONG, because that discards the unmerged save."
+      - point: "Wraps the apply in an edit session"
+        description: "It calls `startOmlEditSession` with `{ \"input\": { \"eSpaceName\": \"MyModule\" }, \"sessionToken\": … }` before `applyModelApiCode`, and `endOmlEditSession` the same way after `omlMerge` returns `merged: true`. Calling `applyModelApiCode` with no session started, or leaving the session open at the end, is the WRONG answer."
 
       - point: "Does not call `omlPublish`"
         description: "The sequence ends at `omlMerge`; it does NOT call `omlPublish`, because the user did not ask to publish."
@@ -205,7 +212,7 @@ scenario_4:
   validation:
     prerequisites:
       - point: "Identifies a compile error"
-        description: "The response says the code failed to compile - NOT a runtime error, NOT a validation error. (Compile failures surface as an MCP tool error carrying `Script compilation failed` and `compilationErrors:` lines - there is no result object, so no `exceptionMessage` or `mutatedOmlPath` - and the out file was not written, so the working copy did not move.)"
+        description: "The response says the code failed to compile — NOT a runtime error, NOT a validation error. (Compile failures surface as an MCP tool error carrying `Script compilation failed` and `compilationErrors:` lines — there is no result object, so no `exceptionMessage` or `mutatedOmlPath` — and the out file was not written, so the pointer did not advance.)"
 
       - point: "Proposes a retry"
         description: "The response says the agent should fix the `code` and submit a new `applyModelApiCode` call."
@@ -218,7 +225,7 @@ scenario_4:
         description: "The fix proposed is to wrap the statements in a complete `eSpace => { ... }` lambda ending in `}` (and still no `eSpace.Save`). NOT 'add semicolons', NOT 'rename the parameter'."
 
       - point: "Does NOT call `omlReset` to recover"
-        description: "The response correctly says `omlReset` is NOT needed: failed calls leave the edit session's working copy untouched, so the next attempt resumes from the last good state. `omlReset` ends the edit session (and leaves its file on disk); it is for deliberately dropping unmerged work, not for error recovery."
+        description: "The response correctly says `omlReset` is NOT needed: failed calls leave the session pointer untouched, so the next attempt resumes from the last good state. `omlReset` is for deliberately dropping an in-flight chain, not for error recovery."
 
 scenario_5:
   name: "silent_noop_trap"
@@ -247,7 +254,7 @@ scenario_5:
         description: "The trigger is a lambda that compiles cleanly and runs but NEVER mutates `eSpace` (e.g. an empty body, or statements that only read or build locals, such as `eSpace => { var n = eSpace.Name; }`). The response identifies this specific cause — NOT 'compilation succeeded but logic was wrong', NOT 'wrong parameters'. Offering `Console.WriteLine(...)` as the example trigger is inaccurate under the current contract: the code sandbox rejects `Console` before compile, so that lambda is a tool error, not a silent no-op."
 
       - point: "Response shape is successful-looking"
-        description: "The response correctly states that the result has an empty `exceptionMessage`, no `validationMessages` entry of type `Error` (typically `[]`), AND a populated `mutatedOmlPath` - the out file is written and becomes the working copy, so it is indistinguishable from a clean run by field inspection alone. A populated `mutatedOmlPath` must NOT be described as proof the model changed; and the answer must NOT claim `mutatedOmlPath` is absent from the response (it is present - it is the path handed to `omlMerge`). It must NOT describe `compilationErrors` / `validationOutput` result fields - they do not exist."
+        description: "The response correctly states that the result has an empty `exceptionMessage`, no `validationMessages` entry of type `Error` (typically `[]`), AND a populated `mutatedOmlPath` — the out file is written and the session pointer advances, so it is indistinguishable from a clean run by field inspection alone. A populated `mutatedOmlPath` must NOT be described as proof the model changed; and the answer must NOT claim `mutatedOmlPath` is absent from the response (it is present — it is the path handed to `omlMerge`). It must NOT describe `compilationErrors` / `validationOutput` result fields — they do not exist."
 
       - point: "Defence is read-back via `get*`"
         description: "The defensive step prescribed is: after mutating, call `getDataModel` (or the matching `get*`) and confirm the intended change is actually present. NOT 'check `exceptionMessage`' alone."
@@ -256,7 +263,7 @@ scenario_5:
         description: "The response explicitly says that an empty `exceptionMessage` only means the injected Save ran — it does NOT prove the lambda actually changed anything semantically."
 
       - point: "Distinguishes the silent no-op from a runner process-crash"
-        description: "If the answer contrasts the no-op with the crash outcome, it gets the discriminator right: a silent no-op WRITES the out file (populated `mutatedOmlPath`, working copy moves), whereas a process-crash returns `mutatedOmlPath: \"\"` with the working copy unchanged. It must NOT conflate the two - 'empty everything' is the crash, not the no-op."
+        description: "If the answer contrasts the no-op with the crash outcome, it gets the discriminator right: a silent no-op WRITES the out file (populated `mutatedOmlPath`, pointer advances), whereas a process-crash returns `mutatedOmlPath: \"\"` with the pointer unchanged. It must NOT conflate the two — 'empty everything' is the crash, not the no-op."
 
 scenario_6:
   name: "traditional_web_ui_creation"
@@ -268,7 +275,7 @@ scenario_6:
     files: []
 
   prompt: |
-    The open OML module is a **Traditional Web** app (its `listApps`
+    The open OML module is a **Traditional Web** app (its `listOpenModules`
     `moduleType` is `"Traditional"`). It has a web flow named `PlansFlow`, a
     server entity `Post` (with a `Content` text attribute), and an
     existing screen named `Dashboard`. Using the in-process MCP Server,
@@ -401,7 +408,7 @@ scenario_8:
         description: "The prescribed recovery is: first run a trivial health probe — e.g. the throw-probe `eSpace => { throw new Exception(\"PROBE:ok\"); }`, where `PROBE:ok` coming back in `exceptionMessage` proves the session is healthy (a trivial non-crashing lambda that returns a path is equally acceptable) — then re-issue the lambda with ONE risky/unproven member per call until it dies. A probe using `System.Console.WriteLine` is WRONG (sandbox-rejected). It must NOT be 'reread your code carefully', 'retry the same call', or 'restart Service Studio' as the first move."
 
       - point: "Does NOT call `omlReset`"
-        description: "The response says `omlReset` is not needed: a crash leaves the working copy unchanged, so the last good state (including earlier saves in the edit session) is intact. Calling `omlReset` would end the session and discard those saves and is the WRONG answer."
+        description: "The response says `omlReset` is not needed: a crash leaves the session pointer unchanged, so the last good state (including earlier successful mutations in the chain) is intact. Calling `omlReset` would discard that chain and is the WRONG answer."
 
 scenario_9:
   name: "chart_binding_and_reference_probe"
@@ -530,7 +537,7 @@ scenario_11:
         description: "The response avoids the traps that bite on a migrated module: no `dataAction.CreateInputParameter(...)`, no `screen.ScreenDataSets` enumeration (prefer `screen.DataActions.Named(...)`), no `screen.ClientActions` (use `ScreenActions`), and no recursive `.Widgets` walking — descend one known-container level at a time. It must NOT propose locating a crash with `Console.WriteLine` breadcrumbs (the sandbox rejects `Console`, and a crash returns nothing anyway); bisect by removing statements instead. It must NOT propose reflection (`GetType().GetProperty(...)`, `GetMethod`, `Invoke`) to reach node members — the sandbox rejects it (only `GetType().Name` and `GetType().GetInterfaces()` pass, for diagnosis); use the typed interface members (e.g. `Target`, `CycleTarget`)."
 
       - point: "One atomic mutation per step, validate after each, fix forward"
-        description: "The workflow applies one mutation per call with `getValidationMessages` after each (to catch saved-but-invalid immediately), fixes forward rather than calling `omlReset` or `endOmlEditSession` (either would discard every unmerged save including earlier good fixes), and calls `omlMerge` at the end with the final `mutatedOmlPath`, then `endOmlEditSession`."
+        description: "The workflow applies one mutation per call with `getValidationMessages` after each (to catch saved-but-invalid immediately), fixes forward rather than calling `omlReset` (which would nuke the whole unmerged chain including earlier good fixes), and calls `omlMerge` once at the end with the final `mutatedOmlPath`."
 
       - point: "Hands layout/CSS work back to the user, or verifies it visually"
         description: "The response defers visual layout / CSS tweaks to the user in Service Studio, because they are unreliable blind through the Model API (no rendered preview, no visual iteration). If it does make CSS changes, it puts them in the theme stylesheet (not block/screen stylesheets, whose edits often do not publish) and confirms the deployed CSS and a rendered screenshot. It also scopes 'the screens' to the content screens and flags the shared `Common` layout blocks as an optional follow-up rather than converting them unprompted."
@@ -583,7 +590,7 @@ scenario_13:
   prompt: |
     I'm driving the open module through the in-process MCP Server. Every
     single tool call I make — `getDataModel`, `applyModelApiCode`,
-    `listApps`, all of them — comes back with exactly
+    `listOpenModules`, all of them — comes back with exactly
     `An error occurred invoking '<toolName>'`. I noticed my client is
     sending extra argument fields I never wrote, with names like
     `inputPropertyNameValPairs`. What's wrong and what should I do? If I
@@ -609,7 +616,7 @@ scenario_13:
         description: "The answer states the `Accept` header must list BOTH `application/json` and `text/event-stream`, and/or that omitting either yields HTTP 406. Naming only one of the two content types is incomplete."
 
       - point: "Obtains a `sessionToken` once via `createSessionToken` and passes it on every call"
-        description: "The answer says the session is carried by a token from the `createSessionToken` tool (called once; the user approves it in Service Studio), passed as the top-level `sessionToken` argument on every later `tools/call`, with each tool's own arguments (except `listApps`) wrapped in `input`. It must NOT rely on an `Mcp-Session-Id` response header from `initialize` — the in-process server returns none."
+        description: "The answer says the session is carried by a token from the `createSessionToken` tool (called once; the user approves it in Service Studio), passed as the top-level `sessionToken` argument on every later `tools/call`, with each tool's own arguments (except `listOpenModules`) wrapped in `input`. It must NOT rely on an `Mcp-Session-Id` response header from `initialize` — the in-process server returns none."
 
       - point: "Persists the token across processes, outside the repo"
         description: "If the answer proposes one-shot scripts / `curl` invocations, it says the token must be written to a file and re-read per invocation — because each process starts fresh and an in-memory token would be lost, forcing a new `createSessionToken` (and approval dialog) on every call. It should place that file outside the user's repository (OS temp dir), NOT at a repo-relative path, since the token is an authorization credential that no `.gitignore` rule covers. An answer that only says 'cache it in memory' without addressing process boundaries is incomplete."
@@ -655,7 +662,7 @@ scenario_14:
         description: "The code builds a string (e.g. with `string.Join` over `w.GetType().Name`) and ends with `throw new Exception(\"PROBE:\" + s);`, and the response says the text comes back in `exceptionMessage`. Returning it through `stdoutOutput`, or through a local variable, is the WRONG answer."
 
       - point: "Knows the probe commits nothing"
-        description: "The response says a throw-probe saves nothing and leaves the working copy where it was (`mutatedOmlPath` is empty), so no `omlReset` or `endOmlEditSession` is needed - and ideally that `validationMessages` for the in-memory model are still returned, which lets a probe preview TrueChange for an edit placed before the throw."
+        description: "The response says a throw-probe saves nothing and leaves the session pointer where it was (`mutatedOmlPath` is empty), so no `omlReset` is needed — and ideally that `validationMessages` for the in-memory model are still returned, which lets a probe preview TrueChange for an edit placed before the throw."
 
       - point: "`imports` only `OutSystems.Model.*`; NRWidgets types fully qualified"
         description: "The `imports` array contains only `OutSystems.Model` or its sub-namespaces (or is empty). `ServiceStudio.Plugin.NRWidgets` is NOT in `imports` — the host rejects it with `Import '…' is not allowed` — and NRWidgets types are written fully qualified in the code (e.g. `ServiceStudio.Plugin.NRWidgets.IInput`)."
@@ -736,7 +743,7 @@ scenario_16:
         description: "The code REMOVES `eSpace.RegisteredRole` — and the `Clerk` role — from `approvals.Roles`, leaving `Manager`, because screens carry `Registered` plus every application role by default. Merely adding `Manager` (or checking it is present) leaves every logged-in user with access and is the WRONG answer."
 
       - point: "Verifies on the live module after merging"
-        description: "The confirmation step re-reads the screens' roles AFTER omlMerge and AFTER endOmlEditSession (reads inside the edit session show the working copy, so only a read after the session ended shows what Service Studio kept) - not only the pre-merge copy or a clean response. A public screen should read Anonymous (usually with Registered); Approvals should read Manager only."
+        description: "The confirmation step ends the edit session after omlMerge and THEN re-reads the screens' roles, so the read shows what Service Studio kept. Inside the session, reads still show the working copy, so a read taken before ending it, the pre-merge copy, or a clean response alone does NOT count. A public screen should read Anonymous (usually with Registered); Approvals should read Manager only."
 
       - point: "Full lambda — `eSpace => { ... }`, no `eSpace.Save(...)`"
         description: "The `code` is a complete `eSpace => { ... }` lambda (begins with `eSpace =>`, ends in `}`) and does NOT call `eSpace.Save(...)`."
@@ -746,6 +753,7 @@ scenario_17:
 
   read_references:
     - reference/patterns-by-element.md
+    - reference/logic-and-integrations.md
 
   codebase:
     files: []
@@ -776,7 +784,7 @@ scenario_17:
         description: "For `Recalculate` the code creates both nodes itself (e.g. `CreateNode<IStartNode>()` / `CreateNode<IEndNode>()`) and wires Start → End, because server, client and screen actions ship with NO nodes. Assuming the server action already has a Start/End is the WRONG answer."
 
       - point: "Positions nodes explicitly"
-        description: "The code gives the hand-created nodes distinct positions (or the response says layout must be done by hand) — it does NOT rely on the host's `Action Flow auto arrange completed` log line, which leaves hand-wired nodes stacked at one coordinate."
+        description: "The code gives the hand-created nodes distinct positions — with the `Connected*` helpers (e.g. `ConnectedBelow`, which wire and position in one step), `Below` / `ToTheRightOf`, or explicit coordinates — or the response says layout must be done by hand. It does NOT rely on the host's `Action Flow auto arrange completed` log line, which leaves hand-wired nodes stacked at one coordinate."
 
       - point: "Full lambda — `eSpace => { ... }`, no `eSpace.Save(...)`"
         description: "The `code` is a complete `eSpace => { ... }` lambda (begins with `eSpace =>`, ends in `}`) and does NOT call `eSpace.Save(...)`."
@@ -820,6 +828,9 @@ scenario_18:
 
 scenario_19:
   name: "o11_bpt_process_creation"
+
+  read_references:
+    - reference/logic-and-integrations.md
 
   codebase:
     files: []
@@ -892,6 +903,9 @@ scenario_20:
 scenario_21:
   name: "sql_columns_map_by_position"
 
+  read_references:
+    - reference/logic-and-integrations.md
+
   codebase:
     files: []
 
@@ -922,6 +936,9 @@ scenario_21:
 
 scenario_22:
   name: "traditional_table_inside_layout"
+
+  read_references:
+    - reference/traditional-ui-creation.md
 
   codebase:
     files: []
@@ -1002,7 +1019,119 @@ scenario_24:
       - point: "Avoids getDataModel for orientation on a large module"
         description: "The response notes that `getDataModel` on a large module can be very large (100k+ characters) and reserves it, or the per-element getters, for drilling into the parts that need detail."
 
+      - point: "Wraps the probe in its own edit session"
+        description: "The response calls `startOmlEditSession` before the probe and `endOmlEditSession` after it, because `applyModelApiCode` only runs inside an edit session, and it gives (or says it gives) the Beta notice for those session calls. Running the probe with no session, or leaving the session open afterwards, is WRONG."
+
 scenario_25:
+  name: "open_named_module_then_close_it"
+
+  read_references:
+    - reference/module-discovery.md
+
+  codebase:
+    files: []
+
+  prompt: |
+    I'm driving Service Studio through its MCP server and already hold a
+    session token. `listOpenModules` shows only `CustomerPortal` open. The user
+    asks: "Add a `Discount` decimal attribute to the `Order` entity in the
+    OrderManagement module." List the MCP tool calls you would make, in order,
+    with their JSON arguments, from finding the module to finishing the task,
+    and say what you tell the user along the way.
+
+  validation:
+    prerequisites:
+      - point: "Gives an ordered sequence of MCP tool calls"
+        description: "The response lists concrete MCP tool calls with JSON arguments, in order, that end with the attribute added."
+
+    skill_scoring:
+      - point: "Finds the module with `searchApps`"
+        description: "Because the module isn't open, the response calls `searchApps` with a search for the module's name, e.g. `{ \"input\": { \"search\": \"OrderManagement\" }, \"sessionToken\": … }`. Guessing a key, or telling the user to open the module without trying `searchApps`, is WRONG."
+
+      - point: "Opens it with `openModule` by key"
+        description: "It calls `openModule` with `{ \"input\": { \"moduleKey\": \"<key from searchApps>\" }, \"sessionToken\": … }`, the module's `key` from the `searchApps` result. Passing the module's name as `moduleKey`, or opening a module before confirming one match, is WRONG. It says that when several modules match, or none, it asks the user and opens nothing."
+
+      - point: "Handles `opening` by calling again"
+        description: "It says a `status: \"opening\"` result means Studio hasn't finished, and that it calls `openModule` again with the same `moduleKey` to keep waiting, not that the opening failed."
+
+      - point: "Works through the returned `tabId`"
+        description: "Every later call (`getDataModel`, `startOmlEditSession`, `applyModelApiCode`, `omlMerge`, `endOmlEditSession`, `closeModule`) passes the `module.tabId` returned by `openModule` as `eSpaceName`, inside `input`."
+
+      - point: "Wraps the edit in an edit session"
+        description: "It calls `startOmlEditSession` before the first `applyModelApiCode`, and `endOmlEditSession` after `omlMerge` returns `merged: true` and before `closeModule`, because `applyModelApiCode` only runs inside a session and `closeModule` returns `notClosed` while one is open. Applying with no session, or calling `closeModule` with the session still open, is WRONG."
+
+      - point: "Tells the user it opened the module"
+        description: "It tells the user which module it opened."
+
+      - point: "Closes the module it opened, warning about the save prompt"
+        description: "Once the work is merged, it calls `closeModule` with the `tabId`, and first tells the user that Studio will ask them to Save, Don't Save or Keep Open because the merged module has unsaved changes. On `status: \"closing\"` it calls `closeModule` again with the same `eSpaceName`. Leaving the module open with no mention, or closing without warning the user, is WRONG."
+
+scenario_26:
+  name: "ambiguous_module_name_resolved_by_tab_id"
+
+  read_references:
+    - reference/module-discovery.md
+
+  codebase:
+    files: []
+
+  prompt: |
+    Through the Service Studio MCP server, my `applyModelApiCode` call with
+    `"eSpaceName": "Orders"` failed with `MODULE_AMBIGUOUS`: "Several open
+    modules match 'Orders'; pass the tabId of the one to work on as
+    eSpaceName. Candidates: Orders (tabId 'a1'), Orders (tabId 'b7')." The
+    user said "add the attribute to the module I have open". What do you do
+    next?
+
+  validation:
+    prerequisites:
+      - point: "Does not blame the lambda"
+        description: "The response does not treat the error as a problem with the C# code and does not rewrite the lambda as the fix."
+
+    skill_scoring:
+      - point: "Retries with a `tabId`, not the name"
+        description: "The response retries `applyModelApiCode` with one of the candidates' `tabId` values as `eSpaceName` (e.g. `\"eSpaceName\": \"b7\"`), not with the name again. (The key works only when the two tabs hold different modules; when they hold the same module it matches both.)"
+
+      - point: "Uses `isSelected` to resolve 'the module I have open'"
+        description: "It calls `listOpenModules` and picks the row whose `isSelected` is true among the candidates, because `isSelected` marks the tab in front of its Studio window."
+
+      - point: "Asks instead of guessing when it can't tell"
+        description: "It says that if both candidates are selected (one per Studio window) or neither is, it asks the user which one, for example by naming each tab's window or environment, rather than picking one."
+
+scenario_27:
+  name: "several_environments_carry_environment_into_open"
+
+  read_references:
+    - reference/module-discovery.md
+
+  codebase:
+    files: []
+
+  prompt: |
+    I'm driving Service Studio through its MCP server and already hold a
+    session token. The user asks: "Add a `Phone` text attribute to the
+    `Customer` entity in the CRM module." It isn't open, so I called
+    `searchApps` with `{ "input": { "search": "CRM" }, "sessionToken": … }`
+    and it failed with `ENVIRONMENT_REQUIRED`: "Service Studio's windows are
+    logged in to several environments: 'dev.example.com', 'qa.example.com'.
+    Ask the developer which one to search, then pass it as environment."
+    List the MCP tool calls you make from here until the module is open, with
+    their JSON arguments, and what you do if `openModule` returns
+    `status: "opening"`.
+
+  validation:
+    prerequisites:
+      - point: "Asks the user which environment"
+        description: "The response asks the user which of the two environments they mean before searching again, instead of picking one itself."
+
+    skill_scoring:
+      - point: "Passes the chosen environment to `openModule` too"
+        description: "The `openModule` call carries the environment the user chose next to the key, e.g. `{ \"input\": { \"moduleKey\": \"<key from searchApps>\", \"environment\": \"qa.example.com\" }, \"sessionToken\": … }`. Passing it only to `searchApps` and calling `openModule` with `moduleKey` alone is WRONG: with several environments logged in, that fails with `ENVIRONMENT_REQUIRED` again."
+
+      - point: "Keeps `moduleKey` and `environment` when it calls again"
+        description: "On `status: \"opening\"`, it calls `openModule` again with the same `moduleKey` and the same `environment` to keep waiting for the same opening. Calling again without `environment`, or treating `opening` as a failure, is WRONG."
+
+scenario_28:
   name: "new_action_sequential_loops_layout"
 
   codebase:

@@ -3,6 +3,8 @@
 **Transport**: MCP (Service Studio in-process MCP Server).
 **Scenario**: Claude submits a lambda that compiles cleanly and runs, but never actually mutates `eSpace` (e.g. a read-only statement while exploring the API). The host's appended `eSpace.Save(...)` still runs, producing a "saved" OML whose bytes are identical to the input. The response *looks* like a clean save, but a follow-up read shows nothing changed. Claude diagnoses the silent-no-op trap, learns the right way to explore (the throw-probe), retries with statements that actually mutate `eSpace`, succeeds.
 
+> **Edit session.** This walkthrough shows only the calls its point needs. Call `startOmlEditSession` before the first `applyModelApiCode`, and `endOmlEditSession` after the final merge ([`01-add-entity-via-mcp.md`](01-add-entity-via-mcp.md), [`../SKILL.md`](../SKILL.md) § 2.1).
+
 This walkthrough teaches the **dominant failure mode** on the MCP path. The wire response on Attempt 1 carries no error fields — the only signal is that the verifying read doesn't reflect the mutation. See [`../reference/lambda-contract.md`](../reference/lambda-contract.md) § "Statements that don't reference `eSpace`" for the full mechanics.
 
 ---
@@ -84,7 +86,7 @@ The follow-up read is the only place the silent no-op surfaces. The clean respon
 
 ### Exploring correctly — the throw-probe
 
-To *see* something from inside a lambda, don't print (the sandbox forbids `Console`) and don't rely on a local: build a string and **throw it**. The text comes back in `exceptionMessage`, nothing is saved, and the working copy does not move - so a probe can never masquerade as a mutation. (A probe still needs the module's edit session open, like every `applyModelApiCode` call.)
+To *see* something from inside a lambda, don't print (the sandbox forbids `Console`) and don't rely on a local: build a string and **throw it**. The text comes back in `exceptionMessage`, nothing is saved, and the working copy does not move - so a probe can never masquerade as a mutation.
 
 **Request**:
 

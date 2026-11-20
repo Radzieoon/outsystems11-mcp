@@ -16,15 +16,21 @@ Do this for the request below:
 
 0. **Session.** If you don't already hold one, call `createSessionToken` once
    and pass the token as top-level `sessionToken` on every call. Every tool
-   except `listApps` takes `{ "input": { … }, "sessionToken": "<token>" }`.
+   except `listOpenModules` takes `{ "input": { … }, "sessionToken": "<token>" }`.
+   Pass the module's `tabId` from `listOpenModules` as `eSpaceName` (on
+   `MODULE_AMBIGUOUS`, retry with the `tabId` the user means). If the request names a
+   module that isn't open, find it with `searchApps` and open it with `openModule`
+   (on `ENVIRONMENT_REQUIRED`, ask the user which environment and pass it as
+   `environment` to both); close it with `closeModule` when done. Older builds (`listApps`) can't open modules:
+   ask the user.
 1. **Read first.** Call `getDataModel` (and any relevant `get*` read tool, e.g.
    `getServerAction`, `getScreen` with `objectName`) with
    `input: { eSpaceName, includeJson: "Never" }` and pattern-match the output
-   before writing anything.
-2. **Open the edit session, then mutate.** Call `startOmlEditSession` with
-   `input: { eSpaceName }` once per module (without it `applyModelApiCode` fails with
-   `No OML edit session is started`), then `applyModelApiCode` with
-   `input: { eSpaceName, code, imports }`,
+   before writing anything. Outside an edit session, make these reads one at a time:
+   parallel reads on one module can fail with `OML not found: …-in.oml` (run the failed
+   one again, alone).
+2. **Mutate.** Call `startOmlEditSession` (`input: { eSpaceName }`) once, then
+   `applyModelApiCode`, `input: { eSpaceName, code, imports }`,
    passing a full `eSpace => { ... }` lambda that ends in `}` and never calls
    `eSpace.Save`. To change an existing element, look it up
    (`eSpace.ServerActions.Named("X")`) and mutate it. Never replay `get*`
@@ -42,9 +48,10 @@ Do this for the request below:
    error is an MCP tool error carrying diagnostics, not silence) — bisect with
    one risky member per call.
 4. **Finalise.** Call `omlMerge` with
-   `input: { eSpaceName, mutatedOmlPath: "<final path>" }` (tell the user the
-   Compare-and-Merge window is coming), then `endOmlEditSession` with
-   `input: { eSpaceName }`. Don't call `omlPublish` unless the user asked to publish.
+   `input: { eSpaceName, mutatedOmlPath: "<final path>" }`, then `endOmlEditSession`
+   once it returned `merged: true`. Under manual review the merge waits for the user:
+   announce the window and make sure your client's tool timeout allows it. Don't call `omlPublish` unless the user asked to
+   publish.
 
 The change to make:
 

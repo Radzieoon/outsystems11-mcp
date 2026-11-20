@@ -1,9 +1,11 @@
-# 04 - Discarding work: `endOmlEditSession` and `omlReset` walkthrough
+# 04 — `omlReset` drop-and-restart walkthrough
 
 **Transport**: MCP (Service Studio in-process MCP Server).
-**Scenario**: The agent has built two saves inside an edit session. The user changes direction mid-task and wants the agent to start over from the live module instead of layering more saves onto the working copy. The agent ends the session, which discards the unmerged saves, and opens a new one. Part 2 shows `omlReset` fired *by mistake* and what is still recoverable.
+**Scenario**: The agent has built a two-step mutation chain. The user changes direction mid-task and wants the agent to start over from the live module instead of layering more mutations onto the existing chain. The agent calls `omlReset`, which ends the edit session: reads after it see the live module, and the agent starts a new session before it edits again. Part 2 shows the same tool fired *by mistake*, and why the discarded work can't come back.
 
-For routine multi-step edits (where you just want each save to build on the last), do nothing special - the session carries successive saves forward (see [`03-multi-step-edit.md`](03-multi-step-edit.md)). To **accept** work into the live module rather than drop it, call `omlMerge` with the `mutatedOmlPath` the apply response returns. For the full session mechanics, verified live on 2026-10-30, see [`../reference/mcp-session-pointer.md`](../reference/mcp-session-pointer.md). All `code` payloads below are **full `eSpace => { ... }` lambdas** that end in `}` and do **not** include `eSpace.Save(...)` - see [`../reference/lambda-contract.md`](../reference/lambda-contract.md).
+> **Edit session.** The chain below runs inside an edit session started with `startOmlEditSession` ([`../SKILL.md`](../SKILL.md) § 2.1). `omlReset` ends that session along with the unmerged edits, so **call `startOmlEditSession` again before the next `applyModelApiCode`**, and `endOmlEditSession` after the final merge. `endOmlEditSession` discards the same way and is the simpler call. Neither can be undone.
+
+For routine multi-step edits (where you just want each call to read the last good state), do nothing — the session pointer chains successive calls automatically (see [`03-multi-step-edit.md`](03-multi-step-edit.md)). To **accept** a chain into the live IDE rather than drop it, call `omlMerge` with the `mutatedOmlPath` the apply response returns. For the full pointer mechanics, see [`../reference/mcp-session-pointer.md`](../reference/mcp-session-pointer.md). All `code` payloads below are **full `eSpace => { ... }` lambdas** that end in `}` and do **not** include `eSpace.Save(...)` — see [`../reference/lambda-contract.md`](../reference/lambda-contract.md).
 
 ---
 
@@ -15,20 +17,15 @@ For routine multi-step edits (where you just want each save to build on the last
 
 > Also add an `Email` attribute to `Customer`.
 
-…and after the second save lands…
+…and after the second mutation lands successfully…
 
-> Actually, scrap that. I want to start fresh from the live module - no `Customer`, no `Email`.
+> Actually, scrap that. I want to start fresh from the live module — no `Customer`, no `Email`.
 
 ## Turn
 
-### Step 0 - open the session
+### Step 1 — first mutation lands
 
-```jsonc
-{ "input": { "eSpaceName": "MyModule" }, "sessionToken": "<token>" }   // startOmlEditSession
-// -> { "started": true }
-```
-
-### Step 1 - first save lands
+The agent emits the standard `applyModelApiCode` lambda:
 
 **Request**:
 
@@ -55,9 +52,9 @@ For routine multi-step edits (where you just want each save to build on the last
 }
 ```
 
-Empty `exceptionMessage` + out file written ⇒ `<run1>-out.oml` is the working copy.
+Empty `exceptionMessage` + out file written ⇒ pointer advances to `<run1>-out.oml`.
 
-### Step 2 - second save lands
+### Step 2 — second mutation lands
 
 ```jsonc
 {
@@ -82,13 +79,13 @@ Empty `exceptionMessage` + out file written ⇒ `<run1>-out.oml` is the working 
 }
 ```
 
-The working copy is now `<run2>-out.oml`; `<run1>-out.oml` was deleted.
+Pointer advances again, to `<run2>-out.oml`.
 
-### Step 3 - the user changes direction
+### Step 3 — the user changes direction
 
-The user wants to drop everything and start from the live module. The agent ends the session:
+The user wants to drop everything and start from the live module. The agent calls `omlReset`, naming the module:
 
-**Request** (call tool `endOmlEditSession`):
+**Request** (call tool `omlReset`):
 
 ```jsonc
 { "input": { "eSpaceName": "MyModule" }, "sessionToken": "<token>" }
@@ -97,19 +94,25 @@ The user wants to drop everything and start from the live module. The agent ends
 **Response**:
 
 ```jsonc
-{ "ended": true, "discardedChanges": true }
+{
+  "discardedChanges": true,
+  "eSpaceName":       "MyModule"
+}
 ```
 
-The working copy with `Customer` + `Email` is deleted and nothing reached the live module. `discardedChanges: true` says the session had saves; it says the same after a session whose saves were all merged, so on its own it is not a "work lost" signal.
+`discardedChanges: true` ⇒ an unmerged chain was thrown away for good. The file that held the `Customer` + `Email` work, `<run2>-out.oml`, stays on disk until Service Studio restarts, but it is not an undo handle: `omlMerge` refuses it (Part 2).
 
-### Step 4 - a fresh session shows the live module
+### Step 4 — the next call re-snapshots the live module
+
+The agent now starts a new line of work. Since the pointer is empty, the host snapshots the live module from Service Studio and treats it as the input:
+
+**Request** (a fresh `getDataModel` — `includeJson` still required, always `"Never"`):
 
 ```jsonc
-{ "input": { "eSpaceName": "MyModule" }, "sessionToken": "<token>" }   // startOmlEditSession
-// -> { "started": true }
+{ "input": { "eSpaceName": "MyModule", "includeJson": "Never" }, "sessionToken": "<token>" }
 ```
 
-A verifying read (`getDataModel`, `includeJson` always `"Never"`) now answers from a fresh working copy of the live module:
+**Response** (excerpt — no `Customer`, no `Email`; it's the pristine live state again):
 
 ```csharp
 (OutSystems.Model.IReference _System_) => {
@@ -119,56 +122,66 @@ A verifying read (`getDataModel`, `includeJson` always `"Never"`) now answers fr
 }
 ```
 
-From here, any subsequent `applyModelApiCode` mutates the new working copy.
+The reset also ended the edit session, so before its next `applyModelApiCode` the agent calls `startOmlEditSession` again. An apply before that fails with `No OML edit session is started. Call startOmlEditSession before making edits.` The new session starts from the live module, and the pointer advances along a new chain from there.
 
 ---
 
-## Part 2 - `omlReset` by mistake
+## Part 2 — an accidental reset can't be undone
 
-> Wait, no - I didn't mean to throw away the Customer work.
+> Wait, no — I didn't mean to throw away the Customer work.
 
-Suppose the agent had called `omlReset` in Step 3 instead of `endOmlEditSession`:
+`<run2>-out.oml` is still on disk, so handing it to `omlMerge` looks like a way back. It isn't.
 
-```jsonc
-{ "input": { "eSpaceName": "MyModule" }, "sessionToken": "<token>" }   // omlReset
-// -> { "discardedChanges": true, "eSpaceName": "MyModule" }
-```
-
-`omlReset` ends the session exactly like `endOmlEditSession` (the next `applyModelApiCode` fails with `No OML edit session is started. Call startOmlEditSession before making edits.`), with one difference: **`<run2>-out.oml` stays on disk** until Service Studio restarts (verified 2026-10-30). The tool description says that file can be passed to `omlMerge` to bring the work back:
+**Request** (call tool `omlMerge`):
 
 ```jsonc
-{ "input": { "eSpaceName": "MyModule", "mutatedOmlPath": "C:\\…\\<run2>-out.oml" }, "sessionToken": "<token>" }   // omlMerge
+{
+  "input": {
+    "eSpaceName":     "MyModule",
+    "mutatedOmlPath": "C:\\…\\<run2>-out.oml"
+  },
+  "sessionToken": "<token>"
+}
 ```
 
-That recovery path was **not exercised** in the 2026-10-30 verification, so offer it as a best effort: tell the user the file survives only until Service Studio restarts, try the merge, and if it fails, re-apply the lambdas in a new session. After `endOmlEditSession` there is nothing to recover; the saves have to be redone.
+**Response** — an MCP tool error (`INVALID_ARGUMENT`), not a result:
+
+```
+'mutatedOmlPath' does not match the working copy currently tracked for module 'MyModule'.
+```
+
+`omlMerge` only accepts the working copy the module currently tracks, and the reset removed it. (This error comes from reading the server code, `OmlMergeTool`, on 2026-11-20; it hasn't been verified live.) Tell the user the work is gone and offer to redo it: the agent still has the code it sent in Steps 1 and 2. To avoid this, merge anything the user might want back before resetting.
 
 ---
 
 ## What just happened
 
-1. `startOmlEditSession` - working copy checked out.
-2. `applyModelApiCode` - added `Customer`; the save became the working copy.
-3. `applyModelApiCode` - added `Email`; the save replaced the working copy.
-4. `endOmlEditSession` - working copy deleted, unmerged saves gone, nothing in the live module.
-5. `startOmlEditSession` + a read - a fresh working copy that shows the live state.
+Five MCP tool calls — two successful mutations, one explicit reset, one verifying read, one refused merge:
 
-There is **no `revertChanges` verb**. `endOmlEditSession` covers the drop-the-work case; a failed `applyModelApiCode` needs nothing, because a failed call writes no out file and leaves the working copy where it was.
+1. `applyModelApiCode` — added `Customer`. Out file written, pointer advances.
+2. `applyModelApiCode` — added `Email`. Out file written, pointer advances.
+3. `omlReset` — dropped the chain. The discarded OML is left on disk rather than deleted.
+4. `getDataModel` — first call after reset, so the host re-snapshots the live module. The verifying read sees the original state.
+5. `omlMerge` with Step 2's `mutatedOmlPath` — refused, because the reset removed the tracked working copy. The discarded work is gone.
 
-## When NOT to end or reset
+There is **no `revertChanges` verb**. `omlReset` covers the drop-the-chain case; routine failed-call recovery is already a no-op on the pointer because a failed call writes no out file and so doesn't advance.
 
-Don't end the session as a defensive measure between steps of one task, and don't reach for `omlReset` or `endOmlEditSession` to recover from a failed `applyModelApiCode`: a failed call never moves the working copy, so there is nothing to clean up. End the session when:
+## When NOT to call `omlReset`
 
-- The user **explicitly** wants to drop the unmerged work.
-- The agent wants to throw away its saves and restart against the live module.
-- The task is done and the last `omlMerge` has returned (the normal closing step).
+Don't call it as a defensive measure or "between unrelated tasks". A failed `applyModelApiCode` never advances the pointer in the first place, so there is nothing to clean up. Reach for `omlReset` only when:
 
-When the user wants to **accept** the work, that is `omlMerge`, not a reset.
+- The user **explicitly** wants to drop the in-flight chain.
+- The agent has built a chain it wants to throw away and restart against the live module.
+- A debugger / test harness wants a clean session before exercising a scenario.
+
+Don't reach for `omlReset` when the user wants to **accept** the chain — that's surfacing it through Service Studio's merge UI.
 
 ## Things to remember
 
-- **`endOmlEditSession` takes `input: { eSpaceName }`** (plus `sessionToken`) and returns `{ ended, discardedChanges }`. It fails with `No OML edit session is started. Call startOmlEditSession first.` when there is no session.
-- **`discardedChanges: true` means the working copy had saves**, merged or not. Only you know whether the last save was merged.
-- **`endOmlEditSession` deletes the working copy; `omlReset` leaves it.** Both end the session. Prefer `endOmlEditSession`; use `omlReset` only when the user wants the file kept as a safety net until Service Studio restarts.
-- **A merge does not end the session.** After `omlMerge` you can keep saving and merge again; end the session yourself when the task is done.
-- **Sessions are per module.** Ending one module's session does not touch another's (not exercised on 2026-10-30, but every error message speaks of "this module").
-- **The next write after ending needs a new `startOmlEditSession`.** Reads work without one and show the live module.
+- **`omlReset` takes `input: { eSpaceName }`** (plus `sessionToken`) and returns `{ discardedChanges, eSpaceName }`. A value that matches no open module raises `MODULE_NOT_LOADED`; a name open in several tabs raises `MODULE_AMBIGUOUS` (pass the `tabId`).
+- **`discardedChanges: true` means an unmerged chain was thrown away**, so it is safe to report as such. `discardedChanges: false` means there was nothing in flight and the call did nothing — resetting a module that only holds a plain snapshot of the live model is a no-op, not a failure.
+- **A reset can't be undone.** The discarded copy stays on disk until Service Studio restarts, but `omlMerge` refuses it. **Merge anything the user might want back before resetting.**
+- **A reset that discards edits ends the edit session.** Reads then see the live module, but call `startOmlEditSession` before the next `applyModelApiCode`. A reset that returns `discardedChanges: false` leaves the session open, so keep working in it.
+- **`omlRefreshReferences` with unmerged edits ends the session too**, just like a reset, and those edits are lost the same way. With none, it leaves the session's working copy without the refreshed references. Refresh before `startOmlEditSession`, or merge and end the session first.
+- **Pointers are per module.** Resetting one module never touches another's chain, and switching modules in Service Studio does **not** implicitly drop a chain — if you want one gone, reset it explicitly by name.
+- **`omlMerge` is the "accept" counterpart to `omlReset`** — opposite intent (surface into the IDE rather than discard). It can't undo a reset.

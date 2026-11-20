@@ -27,7 +27,7 @@ Years of logic, entities, and integrations shouldn't sit frozen in the platform.
 
 | Capability | Status | What it covers |
 | --- | --- | --- |
-| **Read** | **Generally Available (GA)** | Every read tool — `getDataModel`, `getScreen`, `getServerAction`, `runQuery`, `getValidationMessages`, `listApps`, … |
+| **Read** | **Generally Available (GA)** | Every read tool — `getDataModel`, `getScreen`, `getServerAction`, `runQuery`, `getValidationMessages`, `listOpenModules`, `searchApps`, … |
 | **Write** | **Beta** | Mutating `applyModelApiCode` lambdas (new or changed entities, screens, actions, …), plus `omlMerge`, `omlReset`, `omlRefreshReferences` and `omlPublish`. |
 
 The write capabilities above are Beta Features. OutSystems provides Beta Features to collect customer feedback on non-final capabilities. A Beta Feature can change significantly, including through breaking changes, or OutSystems can discontinue it. For the terms that apply, refer to the [OutSystems Beta Features Agreement](https://www.outsystems.com/legal/beta-features-agreement).

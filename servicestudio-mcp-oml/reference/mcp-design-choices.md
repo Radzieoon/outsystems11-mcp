@@ -3,47 +3,53 @@
 ## 1. OMLs being worked on live in a temp folder
 
 ```
-%TEMP%\ServiceStudio.MCPServer\<runId>-in.oml     working copy checked out by startOmlEditSession (or a read snapshot outside a session)
-%TEMP%\ServiceStudio.MCPServer\<runId>-out.oml    the working copy after a successful write (the previous file is deleted)
+%TEMP%\ServiceStudio.MCPServer\<runId>-in.oml     input snapshot
+%TEMP%\ServiceStudio.MCPServer\<runId>-out.oml    mutated result (successful writes only)
 ```
 
-An edit session owns one file at a time. A clean `applyModelApiCode` returns the new `-out.oml` path
-as `mutatedOmlPath`. That is the file to open by hand, or pass to `omlMerge`, if you need to recover
-a change. `endOmlEditSession` deletes it (verified 2026-10-30).
+A clean `applyModelApiCode` returns the `-out.oml` path as `mutatedOmlPath`, and that
+file becomes the edit session's working copy. `omlMerge` accepts only that tracked
+working copy. An older `-out.oml`, or one left behind by `omlReset`, is refused with
+`INVALID_ARGUMENT`, so the MCP tools can't bring discarded work back. You can still
+open a leftover file by hand in Service Studio.
 
-`omlReset` ends the edit session too but does **not** delete the oml file - a discarded working
-copy stays on disk. A reset with no session open does nothing at all.
+`endOmlEditSession` deletes the working copy. `omlReset` leaves it on disk. Both throw
+away the edits that weren't merged. A reset with nothing unmerged does nothing at all.
 
 
 ## 2. Starting Service Studio wipes %TEMP%\ServiceStudio.MCPServer
 
-Recover anything you need **before** restarting Service Studio. Skipped while two or more Service
-Studio instances are running, so leftovers accumulate instead.
+Copy out anything you want to keep **before** restarting Service Studio. Skipped while
+two or more Service Studio instances are running, so leftovers accumulate instead.
 
 
-## 3. Your mid-chain edits are invisible to the agent
+## 3. Your edits during an edit session are invisible to the agent
 
-`startOmlEditSession` takes a copy of your module and the agent edits that;
-your real module is untouched until a merge. Everything the agent reads while the session
-is open comes off its copy, so anything you change in the UI meanwhile is invisible to it.
+`startOmlEditSession` takes a copy of your module, and the agent's `applyModelApiCode`
+calls edit that copy; your real module is untouched. Everything the agent reads while
+the session is open comes off its copy, so anything you change in the UI meanwhile is
+invisible to it.
 
-Two things end the session, so the next read or `startOmlEditSession` takes a fresh copy
-off your live module:
+A merge doesn't change that. After `omlMerge` the agent keeps working on the same
+copy, so it still doesn't see your own edits. If you reject the merge, the copy still
+holds the agent's edits, and it can merge again. If you leave some of its changes out of
+a merge, the copy keeps those too, and its next merge proposes them again. Tell the
+agent, so it starts a new session from what you accepted.
 
-- `endOmlEditSession` - discards unmerged edits and deletes the copy.
-- `omlReset` - the same, but leaves the copy's file on disk.
+The agent is back on your live module only when the session ends:
 
-`omlMerge` does **not** end the session (verified 2026-10-30): it copies the agent's
-file into your module, through the Compare-and-Merge window or silently per your
-setting, and the agent keeps working on its copy afterwards. A merge you cancel changes
-nothing on either side, and the agent can offer the same file again. The agent is asked
-to end the session when its task is done.
+- `endOmlEditSession` — ends the session and deletes the copy, along with any edits
+  that weren't merged.
+- `omlReset` — with unmerged edits, discards them and ends the session. With none, it
+  does nothing, and the session stays open.
 
 
 ## 4. Each open module is tracked separately
 
-Chains on different modules do not interfere. A module can sit on an unmerged copy
-indefinitely — merge or reset it explicitly.
+Edit sessions on different modules do not interfere. A session stays open on its
+module until `endOmlEditSession` (or an `omlReset` with unmerged edits) ends it. It
+lives in Service Studio, so it outlasts the conversation that started it, and every
+agent connected to Studio shares it.
 
 
 ## 5. Every agent session needs approval
@@ -65,7 +71,9 @@ Only approve agents you trust, pointed at modules you own.
 ## 7. Timeouts and port
 
 Writes timeout at 300s, reads at 120s; the default server listens on `41820`,
-moving forward if the port is busy by up to 20 retries.
+moving forward if the port is busy by up to 20 retries. Both timeouts are settings in
+the MCP Server dialog (verified 2026-11-20). Your MCP client has a limit of its own,
+which can end a call first: see [`../SKILL.md`](../SKILL.md) § 9.
 
 
 ## 8. The server starts on demand, not on login
